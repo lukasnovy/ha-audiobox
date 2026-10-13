@@ -123,6 +123,12 @@ class BoxController:
                     self.hass, [self.config.volume_entity], self._volume_changed
                 )
             )
+        if self.config.battery_entity:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.config.battery_entity], self._battery_changed
+                )
+            )
         self._unsubs.append(
             await mqtt.async_subscribe(
                 self.hass,
@@ -279,7 +285,13 @@ class BoxController:
         if new is None:
             return
         old_state = old.state if old is not None else None
-        if new.state in (*NOT_READY, "") or new.state == old_state:
+        if new.state == STATE_UNAVAILABLE:
+            # ADR-35: only a box that was there goes offline. A fresh entity
+            # after a Home Assistant start is not news.
+            if old_state not in (None, *NOT_READY):
+                self._notify("offline")
+            return
+        if new.state in (STATE_UNKNOWN, "") or new.state == old_state:
             return
         if new.state == const.NO_CARD:
             self._schedule(self._async_card_out, "card out")
@@ -552,3 +564,35 @@ class BoxController:
             ),
             f"audiobox {self.config.name} volume",
         )
+
+    # --- battery -------------------------------------------------------------
+
+    def _battery_level(self) -> float | None:
+        state = (
+            self.hass.states.get(self.config.battery_entity)
+            if self.config.battery_entity
+            else None
+        )
+        try:
+            return float(state.state) if state is not None else None
+        except ValueError:
+            return None
+
+    @callback
+    def _battery_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Below the threshold for long enough: notify once."""
+        level = self._battery_level()
+        if level is not None and level < const.BATTERY_LOW_PERCENT:
+            if self._battery_timer is None:
+                self._battery_timer = async_call_later(
+                    self.hass, const.BATTERY_LOW_FOR, self._battery_low
+                )
+        elif self._battery_timer is not None:
+            self._battery_timer()
+            self._battery_timer = None
+
+    @callback
+    def _battery_low(self, _now: datetime) -> None:
+        self._battery_timer = None
+        if (level := self._battery_level()) is not None:
+            self._notify("battery_low", level=round(level))
