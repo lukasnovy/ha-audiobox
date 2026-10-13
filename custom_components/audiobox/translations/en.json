@@ -1,0 +1,153 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Audiobox is already set up. Add boxes and cards on its page."
+    },
+    "step": {
+      "user": {
+        "title": "Audiobox",
+        "description": "Boxes send notifications for unknown cards, a low battery and going offline. Without a target they appear in the Home Assistant notification list.",
+        "data": {
+          "notify_entity": "Notification target"
+        }
+      },
+      "reconfigure": {
+        "title": "Audiobox",
+        "description": "Boxes send notifications for unknown cards, a low battery and going offline. Without a target they appear in the Home Assistant notification list.",
+        "data": {
+          "notify_entity": "Notification target"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "box": {
+      "entry_type": "Box",
+      "initiate_flow": {
+        "user": "Add box",
+        "reconfigure": "Reconfigure box"
+      },
+      "step": {
+        "device": {
+          "title": "Box device",
+          "description": "Pick the device of the box. Its entities are suggested on the next page.",
+          "data": {
+            "device_id": "Device"
+          }
+        },
+        "details": {
+          "title": "Box",
+          "description": "The first player must be the box itself: every listening session starts there. The Music Assistant user needs a provider filter that allows only this child's audiobook account, otherwise positions leak between children.",
+          "data": {
+            "name": "Name",
+            "mqtt_prefix": "MQTT prefix",
+            "ma_user": "Music Assistant user",
+            "card_entity": "Card",
+            "card_present_entity": "Card present",
+            "volume_entity": "Volume knob",
+            "battery_entity": "Battery",
+            "led_entity": "LED",
+            "players": "Players"
+          },
+          "data_description": {
+            "name": "Shown in notification titles.",
+            "mqtt_prefix": "The box publishes its buttons on <prefix>/event/button.",
+            "ma_user": "Every card on this box plays as this user.",
+            "players": "A long press on the knob moves playback to the next player in this order."
+          }
+        }
+      },
+      "error": {
+        "device_taken": "This device already has a box.",
+        "invalid_prefix": "Use letters, digits and single slashes, no spaces, # or +.",
+        "name_required": "Enter a name.",
+        "ma_user_required": "Enter the Music Assistant user.",
+        "no_players": "Add at least one player, the box itself first.",
+        "duplicate_player_name": "Every player needs its own name."
+      },
+      "abort": {
+        "already_configured": "This device already has a box."
+      }
+    },
+    "card": {
+      "entry_type": "Card",
+      "initiate_flow": {
+        "user": "Add card",
+        "reconfigure": "Edit card"
+      },
+      "step": {
+        "user": {
+          "title": "Card",
+          "description": "Tap an unknown card on a box and its UID is filled in here.",
+          "data": {
+            "uid": "Card UID",
+            "media": "Book or playlist",
+            "name": "Name",
+            "shuffle": "Shuffle"
+          },
+          "data_description": {
+            "media": "Pick it in the Music Assistant library.",
+            "name": "Leave empty to use the title of the book.",
+            "shuffle": "Playlists only."
+          }
+        },
+        "reconfigure": {
+          "title": "Card",
+          "data": {
+            "uid": "Card UID",
+            "media": "Book or playlist",
+            "name": "Name",
+            "shuffle": "Shuffle"
+          },
+          "data_description": {
+            "media": "Pick it in the Music Assistant library.",
+            "name": "Leave empty to use the title of the book.",
+            "shuffle": "Playlists only."
+          }
+        }
+      },
+      "error": {
+        "invalid_uid": "Hex pairs joined by dashes, for example 04-a2-3f-91.",
+        "uid_taken": "Another card already has this UID.",
+        "unsupported_media": "Pick an audiobook or a playlist.",
+        "not_library_audiobook": "Pick the audiobook from the Music Assistant library. Anything else plays but never resumes."
+      },
+      "abort": {
+        "already_configured": "Another card already has this UID."
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "player": {
+        "name": "Player"
+      }
+    }
+  },
+  "selector": {
+    "player": {
+      "fields": {
+        "entity": {
+          "name": "Player",
+          "description": "A Music Assistant player."
+        },
+        "name": {
+          "name": "Name"
+        },
+        "colour": {
+          "name": "Colour",
+          "description": "Shown on the LED when this player is selected."
+        }
+      }
+    },
+    "colour": {
+      "options": {
+        "white": "White",
+        "blue": "Blue",
+        "purple": "Purple",
+        "cyan": "Cyan",
+        "pink": "Pink"
+      }
+    }
+  }
+}

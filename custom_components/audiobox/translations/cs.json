@@ -1,0 +1,153 @@
+{
+  "config": {
+    "abort": {
+      "single_instance_allowed": "Audiobox už je nastavený. Krabičky a karty přidáš na jeho stránce."
+    },
+    "step": {
+      "user": {
+        "title": "Audiobox",
+        "description": "Krabičky posílají notifikace o neznámé kartě, slabé baterii a výpadku. Bez cíle se objeví v seznamu oznámení Home Assistantu.",
+        "data": {
+          "notify_entity": "Cíl notifikací"
+        }
+      },
+      "reconfigure": {
+        "title": "Audiobox",
+        "description": "Krabičky posílají notifikace o neznámé kartě, slabé baterii a výpadku. Bez cíle se objeví v seznamu oznámení Home Assistantu.",
+        "data": {
+          "notify_entity": "Cíl notifikací"
+        }
+      }
+    }
+  },
+  "config_subentries": {
+    "box": {
+      "entry_type": "Krabička",
+      "initiate_flow": {
+        "user": "Přidat krabičku",
+        "reconfigure": "Přenastavit krabičku"
+      },
+      "step": {
+        "device": {
+          "title": "Zařízení krabičky",
+          "description": "Vyber zařízení krabičky. Její entity se na další stránce předvyplní.",
+          "data": {
+            "device_id": "Zařízení"
+          }
+        },
+        "details": {
+          "title": "Krabička",
+          "description": "První přehrávač musí být krabička sama, každý poslech začíná tam. Uživatel Music Assistant potřebuje filtr poskytovatelů, který pustí jen účet tohoto dítěte, jinak se pozice mezi dětmi míchají.",
+          "data": {
+            "name": "Název",
+            "mqtt_prefix": "MQTT prefix",
+            "ma_user": "Uživatel Music Assistant",
+            "card_entity": "Karta",
+            "card_present_entity": "Karta v přihrádce",
+            "volume_entity": "Knoflík hlasitosti",
+            "battery_entity": "Baterie",
+            "led_entity": "LED",
+            "players": "Přehrávače"
+          },
+          "data_description": {
+            "name": "Objeví se v nadpisu notifikací.",
+            "mqtt_prefix": "Krabička posílá tlačítka na <prefix>/event/button.",
+            "ma_user": "Všechny karty na téhle krabičce hrají jako tento uživatel.",
+            "players": "Dlouhý stisk knoflíku přesune přehrávání na další přehrávač v tomhle pořadí."
+          }
+        }
+      },
+      "error": {
+        "device_taken": "Tohle zařízení už krabičku má.",
+        "invalid_prefix": "Písmena, číslice a jednotlivá lomítka, bez mezer, # a +.",
+        "name_required": "Vyplň název.",
+        "ma_user_required": "Vyplň uživatele Music Assistant.",
+        "no_players": "Přidej aspoň jeden přehrávač, krabičku jako první.",
+        "duplicate_player_name": "Každý přehrávač potřebuje vlastní název."
+      },
+      "abort": {
+        "already_configured": "Tohle zařízení už krabičku má."
+      }
+    },
+    "card": {
+      "entry_type": "Karta",
+      "initiate_flow": {
+        "user": "Přidat kartu",
+        "reconfigure": "Upravit kartu"
+      },
+      "step": {
+        "user": {
+          "title": "Karta",
+          "description": "Přilož neznámou kartu ke krabičce a její UID se sem doplní.",
+          "data": {
+            "uid": "UID karty",
+            "media": "Kniha nebo playlist",
+            "name": "Název",
+            "shuffle": "Náhodné pořadí"
+          },
+          "data_description": {
+            "media": "Vyber ji v knihovně Music Assistant.",
+            "name": "Prázdné pole převezme název knihy.",
+            "shuffle": "Jen pro playlisty."
+          }
+        },
+        "reconfigure": {
+          "title": "Karta",
+          "data": {
+            "uid": "UID karty",
+            "media": "Kniha nebo playlist",
+            "name": "Název",
+            "shuffle": "Náhodné pořadí"
+          },
+          "data_description": {
+            "media": "Vyber ji v knihovně Music Assistant.",
+            "name": "Prázdné pole převezme název knihy.",
+            "shuffle": "Jen pro playlisty."
+          }
+        }
+      },
+      "error": {
+        "invalid_uid": "Dvojice hex číslic spojené pomlčkami, třeba 04-a2-3f-91.",
+        "uid_taken": "Tohle UID už má jiná karta.",
+        "unsupported_media": "Vyber audioknihu nebo playlist.",
+        "not_library_audiobook": "Vyber audioknihu z knihovny Music Assistant. Cokoli jiného hraje, ale nikdy nenaváže."
+      },
+      "abort": {
+        "already_configured": "Tohle UID už má jiná karta."
+      }
+    }
+  },
+  "entity": {
+    "select": {
+      "player": {
+        "name": "Přehrávač"
+      }
+    }
+  },
+  "selector": {
+    "player": {
+      "fields": {
+        "entity": {
+          "name": "Přehrávač",
+          "description": "Přehrávač Music Assistant."
+        },
+        "name": {
+          "name": "Název"
+        },
+        "colour": {
+          "name": "Barva",
+          "description": "Ukáže se na LED, když se tenhle přehrávač vybere."
+        }
+      }
+    },
+    "colour": {
+      "options": {
+        "white": "Bílá",
+        "blue": "Modrá",
+        "purple": "Fialová",
+        "cyan": "Tyrkysová",
+        "pink": "Růžová"
+      }
+    }
+  }
+}
