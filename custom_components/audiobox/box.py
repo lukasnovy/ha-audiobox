@@ -11,6 +11,7 @@ from typing import Any
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,
+    STATE_ON,
     STATE_PAUSED,
     STATE_PLAYING,
     STATE_UNAVAILABLE,
@@ -263,7 +264,8 @@ class BoxController:
         if new.state in (*NOT_READY, "") or new.state == old_state:
             return
         if new.state == const.NO_CARD:
-            return  # Task 7 replaces this with the card-out branch.
+            self._schedule(self._async_card_out, "card out")
+            return
         uid = normalize_uid(new.state)
         self._cancel_session_timer()
         self._schedule(partial(self._async_play_card, uid), "play card")
@@ -329,3 +331,46 @@ class BoxController:
             )
         self._last_card = uid
         await self._async_flash("green", 1)
+
+    # --- card out and the end of a session ------------------------------------
+
+    def _card_in_tray(self) -> bool:
+        if self.config.card_present_entity:
+            return self._is(self.config.card_present_entity, STATE_ON)
+        state = (
+            self.hass.states.get(self.config.card_entity)
+            if self.config.card_entity
+            else None
+        )
+        return state is not None and state.state not in (*NOT_READY, const.NO_CARD, "")
+
+    async def _async_card_out(self) -> None:
+        """Pause, not stop: re-inserting the same card resumes instantly (ADR-5)."""
+        player = self._selected
+        if self._is(player, STATE_PLAYING):
+            await self._async_try_call(
+                MEDIA_PLAYER, "media_pause", {ATTR_ENTITY_ID: player}
+            )
+        await self._async_led_off()
+        self._cancel_session_timer()
+        self._session_timer = async_call_later(
+            self.hass, const.SESSION_END, self._session_end_fired
+        )
+
+    @callback
+    def _session_end_fired(self, _now: datetime) -> None:
+        self._session_timer = None
+        self._schedule(self._async_end_session, "end session")
+
+    async def _async_end_session(self) -> None:
+        """Stop, which flushes progress, and hand the selection back (ADR-17)."""
+        if self._card_in_tray():
+            return
+        player = self._selected
+        if self._available(player):
+            await self._async_try_call(
+                MEDIA_PLAYER, "media_stop", {ATTR_ENTITY_ID: player}
+            )
+        self._last_card = const.NO_CARD
+        if self.config.players:
+            self._set_selection(self.config.players[0].entity_id)
