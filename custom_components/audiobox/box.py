@@ -5,10 +5,17 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import datetime
+from functools import partial
 import logging
 from typing import Any
 
-from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
+from homeassistant.const import (
+    ATTR_ENTITY_ID,
+    STATE_PAUSED,
+    STATE_PLAYING,
+    STATE_UNAVAILABLE,
+    STATE_UNKNOWN,
+)
 from homeassistant.core import (
     CALLBACK_TYPE,
     Event,
@@ -20,7 +27,9 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 
 from . import const
+from .cards import find_card, normalize_uid
 from .models import AudioboxConfigEntry, BoxConfig
+from .notifications import async_notify
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -97,6 +106,12 @@ class BoxController:
 
     async def async_start(self) -> None:
         """Start listening."""
+        if self.config.card_entity:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.config.card_entity], self._card_changed
+                )
+            )
 
     @callback
     def async_stop(self) -> None:
@@ -219,3 +234,98 @@ class BoxController:
         if self._led_off is not None:
             self._led_off()
             self._led_off = None
+
+    # --- notifications and timers --------------------------------------------
+
+    @callback
+    def _notify(self, key: str, **params: Any) -> None:
+        self.entry.async_create_background_task(
+            self.hass,
+            async_notify(self.hass, self.entry, self.config.name, key, **params),
+            f"audiobox {self.config.name} notify {key}",
+        )
+
+    @callback
+    def _cancel_session_timer(self) -> None:
+        if self._session_timer is not None:
+            self._session_timer()
+            self._session_timer = None
+
+    # --- card ----------------------------------------------------------------
+
+    @callback
+    def _card_changed(self, event: Event[EventStateChangedData]) -> None:
+        new = event.data["new_state"]
+        old = event.data["old_state"]
+        if new is None:
+            return
+        old_state = old.state if old is not None else None
+        if new.state in (*NOT_READY, "") or new.state == old_state:
+            return
+        if new.state == const.NO_CARD:
+            return  # Task 7 replaces this with the card-out branch.
+        uid = normalize_uid(new.state)
+        self._cancel_session_timer()
+        self._schedule(partial(self._async_play_card, uid), "play card")
+
+    async def _async_play_card(self, uid: str) -> None:
+        """2026-10-11 spec section 7 `audiobox_play_card`, step for step."""
+        self._cancel_session_timer()
+        config = self.config
+        player = self._selected
+
+        # ADR-25: without a user the position would go into every child's account.
+        if not config.ma_user:
+            await self._async_flash("red", 3)
+            self._notify("no_ma_user")
+            return
+
+        card = find_card(self.entry, uid)
+        if card is None:
+            self.entry.runtime_data.last_unknown_uid = uid
+            await self._async_flash("red", 3)
+            self._notify("unknown_card", uid=uid)
+            return
+
+        if not self._available(player):
+            await self._async_flash("amber", 3)
+            return
+
+        # Fast path: same card, queue still loaded and paused.
+        if uid == self._last_card and self._is(player, STATE_PAUSED):
+            await self._async_call(MEDIA_PLAYER, "media_play", {ATTR_ENTITY_ID: player})
+            await self._async_flash("green", 1)
+            return
+
+        if self._is(player, STATE_PLAYING):
+            await self._async_call(MEDIA_PLAYER, "media_pause", {ATTR_ENTITY_ID: player})
+            await asyncio.sleep(const.SETTLE_SECONDS)
+
+        try:
+            await self._async_call(
+                MUSIC_ASSISTANT,
+                "play_media",
+                {
+                    ATTR_ENTITY_ID: player,
+                    "media_id": card.media_id,
+                    "enqueue": "replace",
+                    "username": config.ma_user,
+                },
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning("%s: playing %s failed: %s", config.name, card.name, err)
+            await self._async_flash("red", 3)
+            return
+
+        if not await self._async_wait_for(
+            player, STATE_PLAYING, const.PLAY_CONFIRM_SECONDS
+        ):
+            await self._async_flash("red", 3)
+            return
+
+        if card.media_type == const.MEDIA_TYPE_PLAYLIST and card.shuffle:
+            await self._async_try_call(
+                MEDIA_PLAYER, "shuffle_set", {ATTR_ENTITY_ID: player, "shuffle": True}
+            )
+        self._last_card = uid
+        await self._async_flash("green", 1)

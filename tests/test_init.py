@@ -93,7 +93,6 @@ async def test_changing_a_box_reloads(
     assert _box(loaded).config.name == "Renamed"
 
 
-@pytest.mark.xfail(reason="needs play card, Task 6", strict=True)
 async def test_deleted_entity_is_tolerated(
     hass: HomeAssistant,
     mqtt_mock: None,
