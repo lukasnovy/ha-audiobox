@@ -51,7 +51,7 @@
           },
           "data_description": {
             "name": "Objeví se v nadpisu notifikací.",
-            "mqtt_prefix": "Krabička posílá tlačítka na <prefix>/event/button.",
+            "mqtt_prefix": "Krabička posílá tlačítka na tento prefix a /event/button, třeba audiobox1/event/button.",
             "ma_user": "Všechny karty na téhle krabičce hrají jako tento uživatel.",
             "players": "Dlouhý stisk knoflíku přesune přehrávání na další přehrávač v tomhle pořadí."
           }

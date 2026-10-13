@@ -51,7 +51,7 @@
           },
           "data_description": {
             "name": "Shown in notification titles.",
-            "mqtt_prefix": "The box publishes its buttons on <prefix>/event/button.",
+            "mqtt_prefix": "The box publishes its buttons on this prefix followed by /event/button, for example audiobox1/event/button.",
             "ma_user": "Every card on this box plays as this user.",
             "players": "A long press on the knob moves playback to the next player in this order."
           }
