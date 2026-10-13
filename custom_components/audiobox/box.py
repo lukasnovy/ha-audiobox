@@ -117,6 +117,12 @@ class BoxController:
                     self.hass, [self.config.card_entity], self._card_changed
                 )
             )
+        if self.config.volume_entity:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass, [self.config.volume_entity], self._volume_changed
+                )
+            )
         self._unsubs.append(
             await mqtt.async_subscribe(
                 self.hass,
@@ -456,5 +462,93 @@ class BoxController:
             {ATTR_ENTITY_ID: player, "seek_position": target},
         )
 
+    # --- players and volume ----------------------------------------------------
+
     async def _async_next_player(self) -> None:
-        """Implemented in Task 9."""
+        """Move playback to the next free player (2026-09-24 section 7, ADR-24)."""
+        ids = [player.entity_id for player in self.config.players]
+        if not ids:
+            await self._async_flash("amber", 2)
+            return
+        current = self._selected if self._selected in ids else ids[0]
+        taken = {
+            box.selected_player
+            for box in self.entry.runtime_data.boxes.values()
+            if box is not self
+        }
+        start = ids.index(current)
+        candidates = [
+            entity_id
+            for step in range(1, len(ids))
+            if self._available(entity_id := ids[(start + step) % len(ids)])
+            and entity_id not in taken
+        ]
+        if not candidates:
+            await self._async_flash("amber", 2)
+            return
+
+        new = candidates[0]
+        was_playing = self._is(current, STATE_PLAYING)
+        if was_playing or self._is(current, STATE_PAUSED):
+            await self._async_try_call(
+                MUSIC_ASSISTANT,
+                "transfer_queue",
+                {
+                    ATTR_ENTITY_ID: new,
+                    "source_player": current,
+                    "auto_play": was_playing,
+                },
+            )
+            if was_playing and not await self._async_wait_for(
+                new, STATE_PLAYING, const.TRANSFER_CONFIRM_SECONDS
+            ):
+                await self._async_flash("red", 2)
+                return
+
+        # What you feel on the knob is what you hear on the new player.
+        await self._async_try_call(
+            MEDIA_PLAYER,
+            "volume_set",
+            {ATTR_ENTITY_ID: new, "volume_level": self._knob_volume() / 100},
+        )
+        self._set_selection(new)
+        colour = next(
+            player.colour for player in self.config.players if player.entity_id == new
+        )
+        await self._async_flash(colour, 2)
+
+    def _knob_volume(self) -> float:
+        state = (
+            self.hass.states.get(self.config.volume_entity)
+            if self.config.volume_entity
+            else None
+        )
+        try:
+            return float(state.state) if state is not None else const.DEFAULT_VOLUME
+        except ValueError:
+            return const.DEFAULT_VOLUME
+
+    @callback
+    def _volume_changed(self, event: Event[EventStateChangedData]) -> None:
+        """Mirror the knob to the selected player. The latest value wins."""
+        new = event.data["new_state"]
+        if new is None:
+            return
+        try:
+            level = float(new.state)
+        except ValueError:
+            return
+        player = self._selected
+        if level < 0 or not self._available(player):
+            return
+        if self._volume_task is not None and not self._volume_task.done():
+            self._volume_task.cancel()
+        self._volume_task = self.entry.async_create_background_task(
+            self.hass,
+            self._async_try_call(
+                MEDIA_PLAYER,
+                "volume_set",
+                {ATTR_ENTITY_ID: player, "volume_level": level / 100},
+            ),
+            f"audiobox {self.config.name} volume",
+        )
