@@ -1,5 +1,6 @@
 """Setup, unload, the player select and when boxes reload."""
 
+from datetime import timedelta
 from types import MappingProxyType
 
 import pytest
@@ -8,15 +9,28 @@ from homeassistant.config_entries import ConfigEntryState, ConfigSubentry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, State
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
     MockConfigEntry,
+    async_fire_time_changed,
     mock_restore_cache,
 )
 
 from custom_components.audiobox.box import BoxController
 from custom_components.audiobox.const import SUBENTRY_BOX
 
-from .common import BOOK_UID, KIDS_ROOM, LED, SELECT, Services, card_subentry, insert
+from .common import (
+    BOOK_UID,
+    BOX_PLAYER,
+    KIDS_ROOM,
+    LED,
+    SELECT,
+    Services,
+    card_subentry,
+    insert,
+    remove,
+    settle,
+)
 
 
 def _box(entry: MockConfigEntry) -> BoxController:
@@ -116,3 +130,31 @@ async def test_unload(hass: HomeAssistant, loaded: MockConfigEntry) -> None:
     assert await hass.config_entries.async_unload(loaded.entry_id)
     await hass.async_block_till_done()
     assert loaded.state is ConfigEntryState.NOT_LOADED
+
+
+async def test_deleted_player_is_skipped(
+    hass: HomeAssistant,
+    mqtt_mock: None,
+    entry: MockConfigEntry,
+    services: Services,
+) -> None:
+    er.async_get(hass).async_remove(BOX_PLAYER)
+    entry.add_to_hass(hass)
+    assert await hass.config_entries.async_setup(entry.entry_id)
+    await hass.async_block_till_done()
+    assert hass.states.get(SELECT).attributes["options"] == ["Kids room", "Living room"]
+
+    await insert(hass, BOOK_UID)
+    [call] = services["music_assistant.play_media"]
+    assert call.data["entity_id"] == KIDS_ROOM
+
+
+async def test_unload_stops_the_session_timer(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    await remove(hass)
+    assert await hass.config_entries.async_unload(loaded.entry_id)
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(minutes=11))
+    await settle(hass)
+    assert services["media_player.media_stop"] == []

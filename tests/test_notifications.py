@@ -132,3 +132,39 @@ async def test_czech(
     await insert(hass, "04-99-99-99")
     [note] = services["persistent_notification.create"]
     assert note.data["title"] == "Box 1: Neznámá karta"
+
+
+async def test_battery_low_notifies_once(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    hass.states.async_set(BATTERY, "19")
+    await _later(hass, 6)
+    hass.states.async_set(BATTERY, "18")
+    await _later(hass, 12)
+    hass.states.async_set(BATTERY, "17")
+    await _later(hass, 18)
+    assert len(services["persistent_notification.create"]) == 1
+
+
+async def test_battery_low_again_after_charging(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    hass.states.async_set(BATTERY, "15")
+    await _later(hass, 6)
+    hass.states.async_set(BATTERY, "90")
+    await settle(hass)
+    hass.states.async_set(BATTERY, "15")
+    await _later(hass, 12)
+    assert len(services["persistent_notification.create"]) == 2
+
+
+async def test_no_offline_when_mqtt_itself_drops(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    """A broker restart makes every MQTT entity unavailable; the box is fine."""
+    client = hass.data["mqtt"].client
+    client.connected = False
+    hass.states.async_set(CARD, STATE_UNAVAILABLE)
+    await settle(hass)
+    client.connected = True
+    assert services["persistent_notification.create"] == []

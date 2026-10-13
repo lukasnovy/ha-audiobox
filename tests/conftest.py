@@ -39,7 +39,8 @@ async def mqtt_mock(hass: HomeAssistant, mqtt_mock: Any) -> AsyncGenerator[Any]:
 
     Home Assistant core exempts its own integration tests from the lingering
     timer check; custom integrations are not exempt. Only MQTT's timer is
-    cancelled here, so a timer of ours left running still fails the test.
+    cancelled here. The check does not cover our async_call_later timers
+    (they are cancelled on shutdown), so tests/test_init.py checks unload.
     """
     yield mqtt_mock
     client = hass.data["mqtt"].client

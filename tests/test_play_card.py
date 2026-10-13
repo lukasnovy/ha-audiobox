@@ -2,7 +2,9 @@
 
 from datetime import timedelta
 
-from homeassistant.config_entries import SOURCE_USER
+from types import MappingProxyType
+
+from homeassistant.config_entries import SOURCE_USER, ConfigSubentry
 from homeassistant.const import STATE_PAUSED, STATE_PLAYING, STATE_UNAVAILABLE
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.exceptions import ServiceValidationError
@@ -189,3 +191,25 @@ async def test_card_back_from_unavailable_plays(
     await settle(hass)
     await insert(hass, BOOK_UID)
     assert len(services["music_assistant.play_media"]) == 1
+
+
+async def test_unshuffled_playlist_turns_shuffle_off(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    """Music Assistant keeps shuffle per queue, so off has to be said."""
+    plain = card_subentry("04-c1-c2-c3", "library://playlist/8", "Plain")
+    hass.config_entries.async_add_subentry(
+        loaded,
+        ConfigSubentry(
+            data=MappingProxyType(plain["data"]),
+            subentry_type=plain["subentry_type"],
+            title=plain["title"],
+            unique_id=plain["unique_id"],
+        ),
+    )
+    await insert(hass, PLAYLIST_UID)
+    await insert(hass, "04-c1-c2-c3")
+    assert [c.data["shuffle"] for c in services["media_player.shuffle_set"]] == [
+        True,
+        False,
+    ]

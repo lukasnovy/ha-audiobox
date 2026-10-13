@@ -173,6 +173,23 @@ def _card_data(
     return data, errors
 
 
+def _drop_automatic_name(
+    stored: Mapping[str, Any], user_input: dict[str, Any]
+) -> dict[str, Any]:
+    """Let a name taken from the old book follow a newly picked book."""
+    old_media = stored[CONF_MEDIA]
+    old_title = (old_media.get("metadata") or {}).get("title") or old_media.get(
+        "media_content_id"
+    )
+    name = (user_input.get(CONF_NAME) or "").strip()
+    new_book = user_input[CONF_MEDIA].get("media_content_id") != old_media.get(
+        "media_content_id"
+    )
+    if new_book and name == stored[CONF_NAME] == old_title:
+        return {**user_input, CONF_NAME: ""}
+    return user_input
+
+
 class CardSubentryFlow(ConfigSubentryFlow):
     """Add or edit a card."""
 
@@ -211,6 +228,7 @@ class CardSubentryFlow(ConfigSubentryFlow):
         subentry = self._get_reconfigure_subentry()
         errors: dict[str, str] = {}
         if user_input is not None:
+            user_input = _drop_automatic_name(subentry.data, user_input)
             data, errors = _card_data(
                 entry, user_input, current_uid=subentry.data[CONF_UID]
             )
@@ -301,7 +319,10 @@ def _box_schema(hass: HomeAssistant, device_id: str) -> probatio.Schema:
 def _guess_box(hass: HomeAssistant, device_id: str) -> dict[str, Any]:
     """Best guesses for a new box, from the device and its entities."""
     device = dr.async_get(hass).async_get(device_id)
-    name = (device.name_by_user or device.name or "") if device else ""
+    # The prefix and the box's own player follow the firmware name, which a
+    # rename in Home Assistant does not change.
+    firmware_name = (device.name or "") if device else ""
+    name = (device.name_by_user or firmware_name) if device else ""
     entities = er.async_entries_for_device(er.async_get(hass), device_id)
 
     def label(entity: er.RegistryEntry) -> str:
@@ -316,7 +337,7 @@ def _guess_box(hass: HomeAssistant, device_id: str) -> dict[str, Any]:
 
     guess: dict[str, Any] = {
         CONF_NAME: name,
-        CONF_MQTT_PREFIX: name.lower().replace(" ", ""),
+        CONF_MQTT_PREFIX: firmware_name.lower().replace(" ", ""),
         CONF_CARD_ENTITY: first("sensor", lambda e: "card" in label(e)),
         CONF_CARD_PRESENT_ENTITY: first("binary_sensor", lambda e: "present" in label(e))
         or first("binary_sensor"),
@@ -329,7 +350,7 @@ def _guess_box(hass: HomeAssistant, device_id: str) -> dict[str, Any]:
         CONF_LED_ENTITY: first("light"),
     }
     # The box's own Music Assistant player is named like the box.
-    own_player = f"media_player.{slugify(name)}" if name else None
+    own_player = f"media_player.{slugify(firmware_name)}" if firmware_name else None
     if own_player and (
         er.async_get(hass).async_get(own_player) or hass.states.get(own_player)
     ):

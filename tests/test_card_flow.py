@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from homeassistant.config_entries import SOURCE_USER
+from homeassistant.config_entries import SOURCE_USER, ConfigSubentryData
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
@@ -202,3 +202,54 @@ async def test_reconfigure_to_a_taken_uid(hass: HomeAssistant) -> None:
         hass, result, {CONF_UID: BOOK_UID, CONF_MEDIA: media(PLAYLIST_URI, "Songs")}
     )
     assert result["errors"] == {CONF_UID: "uid_taken"}
+
+
+async def test_new_book_replaces_an_automatic_name(
+    hass: HomeAssistant, card_entry: MockConfigEntry
+) -> None:
+    subentry = next(iter(card_entry.subentries.values()))
+    result = await card_entry.start_subentry_reconfigure_flow(hass, subentry.subentry_id)
+    result = await _submit(
+        hass,
+        result,
+        {
+            CONF_UID: BOOK_UID,
+            CONF_MEDIA: media("library://audiobook/999", "New Book"),
+            CONF_NAME: "Book",
+        },
+    )
+    assert result["reason"] == "reconfigure_successful"
+    assert card_entry.subentries[subentry.subentry_id].title == "New Book"
+
+
+async def test_new_book_keeps_a_typed_name(hass: HomeAssistant) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN,
+        data={CONF_NOTIFY_ENTITY: None},
+        subentries_data=[
+            ConfigSubentryData(
+                data={
+                    CONF_UID: BOOK_UID,
+                    CONF_NAME: "Bedtime",
+                    CONF_MEDIA: media(BOOK_URI, "Book"),
+                    CONF_SHUFFLE: False,
+                },
+                subentry_type=SUBENTRY_CARD,
+                title="Bedtime",
+                unique_id=BOOK_UID,
+            )
+        ],
+    )
+    entry.add_to_hass(hass)
+    subentry = next(iter(entry.subentries.values()))
+    result = await entry.start_subentry_reconfigure_flow(hass, subentry.subentry_id)
+    result = await _submit(
+        hass,
+        result,
+        {
+            CONF_UID: BOOK_UID,
+            CONF_MEDIA: media("library://audiobook/999", "New Book"),
+            CONF_NAME: "Bedtime",
+        },
+    )
+    assert entry.subentries[subentry.subentry_id].title == "Bedtime"

@@ -195,3 +195,15 @@ async def test_reconfigure_shows_entity_ids(
     assert result["type"] is FlowResultType.ABORT
     assert result["reason"] == "reconfigure_successful"
     assert entry.subentries[subentry.subentry_id].title == "Kids box"
+
+
+async def test_guesses_ignore_a_renamed_device(
+    hass: HomeAssistant, plain_entry: MockConfigEntry, box_one: dr.DeviceEntry
+) -> None:
+    """The prefix and the box's own player follow the firmware name."""
+    dr.async_get(hass).async_update_device(box_one.id, name_by_user="Kids box")
+    result = await _start(hass, plain_entry)
+    result = await _submit(hass, result, {CONF_DEVICE_ID: box_one.id})
+    assert suggested(result, CONF_NAME) == "Kids box"
+    assert suggested(result, CONF_MQTT_PREFIX) == "audiobox1"
+    assert suggested(result, CONF_PLAYERS) == [_player(BOX_PLAYER, "Kids box")]

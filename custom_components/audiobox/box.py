@@ -61,6 +61,7 @@ class BoxController:
         self._unsubs: list[CALLBACK_TYPE] = []
         self._session_timer: CALLBACK_TYPE | None = None
         self._battery_timer: CALLBACK_TYPE | None = None
+        self._battery_notified = False
         self._led_off: CALLBACK_TYPE | None = None
         self._volume_task: asyncio.Task[None] | None = None
 
@@ -288,7 +289,9 @@ class BoxController:
         if new.state == STATE_UNAVAILABLE:
             # ADR-35: only a box that was there goes offline. A fresh entity
             # after a Home Assistant start is not news.
-            if old_state not in (None, *NOT_READY):
+            # A broker restart makes every MQTT entity unavailable too; that is
+            # not the box going away.
+            if old_state not in (None, *NOT_READY) and mqtt.is_connected(self.hass):
                 self._notify("offline")
             return
         if new.state in (STATE_UNKNOWN, "") or new.state == old_state:
@@ -355,9 +358,12 @@ class BoxController:
             await self._async_flash("red", 3)
             return
 
-        if card.media_type == const.MEDIA_TYPE_PLAYLIST and card.shuffle:
+        if card.media_type == const.MEDIA_TYPE_PLAYLIST:
+            # Music Assistant keeps shuffle per queue, so "off" has to be said too.
             await self._async_try_call(
-                MEDIA_PLAYER, "shuffle_set", {ATTR_ENTITY_ID: player, "shuffle": True}
+                MEDIA_PLAYER,
+                "shuffle_set",
+                {ATTR_ENTITY_ID: player, "shuffle": card.shuffle},
             )
         self._last_card = uid
         await self._async_flash("green", 1)
@@ -580,14 +586,18 @@ class BoxController:
 
     @callback
     def _battery_changed(self, event: Event[EventStateChangedData]) -> None:
-        """Below the threshold for long enough: notify once."""
+        """Below the threshold for long enough: notify once per discharge."""
         level = self._battery_level()
         if level is not None and level < const.BATTERY_LOW_PERCENT:
-            if self._battery_timer is None:
+            if self._battery_timer is None and not self._battery_notified:
                 self._battery_timer = async_call_later(
                     self.hass, const.BATTERY_LOW_FOR, self._battery_low
                 )
-        elif self._battery_timer is not None:
+            return
+        if level is not None:
+            # Charged again: the next discharge may notify.
+            self._battery_notified = False
+        if self._battery_timer is not None:
             self._battery_timer()
             self._battery_timer = None
 
@@ -595,4 +605,5 @@ class BoxController:
     def _battery_low(self, _now: datetime) -> None:
         self._battery_timer = None
         if (level := self._battery_level()) is not None:
+            self._battery_notified = True
             self._notify("battery_low", level=round(level))
