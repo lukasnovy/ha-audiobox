@@ -6,8 +6,11 @@ import asyncio
 from collections.abc import Callable, Coroutine
 from datetime import datetime
 from functools import partial
+import json
 import logging
 from typing import Any
+
+from homeassistant.components import mqtt
 
 from homeassistant.const import (
     ATTR_ENTITY_ID,
@@ -26,6 +29,7 @@ from homeassistant.core import (
 )
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
+from homeassistant.util import dt as dt_util
 
 from . import const
 from .cards import find_card, normalize_uid
@@ -113,6 +117,14 @@ class BoxController:
                     self.hass, [self.config.card_entity], self._card_changed
                 )
             )
+        self._unsubs.append(
+            await mqtt.async_subscribe(
+                self.hass,
+                const.BUTTON_TOPIC.format(prefix=self.config.mqtt_prefix),
+                self._button_received,
+                qos=1,
+            )
+        )
 
     @callback
     def async_stop(self) -> None:
@@ -374,3 +386,75 @@ class BoxController:
         self._last_card = const.NO_CARD
         if self.config.players:
             self._set_selection(self.config.players[0].entity_id)
+
+    # --- buttons -------------------------------------------------------------
+
+    @callback
+    def _button_received(self, msg: mqtt.ReceiveMessage) -> None:
+        try:
+            button = json.loads(msg.payload)["button"]
+        except (ValueError, TypeError, KeyError):
+            _LOGGER.debug(
+                "%s: ignoring button payload %r", self.config.name, msg.payload
+            )
+            return
+        if button == "playpause":
+            self._schedule(self._async_play_pause, "play/pause")
+        elif button in ("back", "fwd"):
+            offset = const.SEEK_STEP if button == "fwd" else -const.SEEK_STEP
+            self._schedule(partial(self._async_seek, offset), "seek")
+        elif button == "encoder_hold":
+            self._schedule(self._async_next_player, "next player")
+        else:
+            _LOGGER.debug("%s: unknown button %r", self.config.name, button)
+
+    async def _async_play_pause(self) -> None:
+        """Only with a card in the tray, otherwise a red blink."""
+        if self._card_in_tray():
+            await self._async_call(
+                MEDIA_PLAYER, "media_play_pause", {ATTR_ENTITY_ID: self._selected}
+            )
+        else:
+            await self._async_flash("red", 1)
+
+    async def _async_seek(self, offset: int) -> None:
+        """Plus or minus 30 s for audiobooks, previous/next track for playlists."""
+        player = self._selected
+        if not player:
+            return
+        card = (
+            find_card(self.entry, self._last_card)
+            if self._last_card != const.NO_CARD
+            else None
+        )
+        if card is not None and card.media_type == const.MEDIA_TYPE_PLAYLIST:
+            service = "media_next_track" if offset > 0 else "media_previous_track"
+            await self._async_call(MEDIA_PLAYER, service, {ATTR_ENTITY_ID: player})
+            return
+
+        state = self.hass.states.get(player)
+        if state is None:
+            return
+        position = float(state.attributes.get("media_position") or 0)
+        duration = float(state.attributes.get("media_duration") or 0)
+        # media_position is a snapshot taken at media_position_updated_at.
+        updated = state.attributes.get("media_position_updated_at")
+        if isinstance(updated, str):
+            updated = dt_util.parse_datetime(updated)
+        drift = (
+            (dt_util.utcnow() - updated).total_seconds()
+            if updated is not None and state.state == STATE_PLAYING
+            else 0
+        )
+        target = max(position + drift + offset, 0)
+        if duration > 0:
+            # Short of the end, so +30 s does not mark the book finished.
+            target = min(target, duration - const.END_CLAMP)
+        await self._async_call(
+            MEDIA_PLAYER,
+            "media_seek",
+            {ATTR_ENTITY_ID: player, "seek_position": target},
+        )
+
+    async def _async_next_player(self) -> None:
+        """Implemented in Task 9."""
