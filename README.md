@@ -49,11 +49,27 @@ payload `{"button": "playpause"}`, `"back"`, `"fwd"` or `"encoder_hold"`.
 2. **Add box.** Pick the box's device; its entities are suggested on the next
    page. Enter the Music Assistant user and the players. The first player must
    be the box itself: every listening session starts there.
-3. **Add card.** Tap a new card on any box. It blinks red and the next
-   Add card form already has its UID. Pick the book or playlist in the Music
-   Assistant library.
+3. **Pair cards.** Open **Audiobox** in the sidebar (administrators only).
 
-Audiobooks must be picked from the Music Assistant library
+## Pairing cards
+
+Tap a card on any box. The top of the Audiobox page shows it at once. Click its
+book in the list and tap the next card.
+
+- The list is the Music Assistant library, with covers. Search by title, switch
+  between audiobooks and playlists, or show only books without a card. The
+  search and filters stay set for the next card and the next visit.
+- A book that already has a card is greyed out and shows the card's UID.
+- A card that already has a book plays it as usual. The page shows which book
+  it is: click another book to give the card to it, or remove the card.
+- While the page is open, an unknown card only blinks red. The notification is
+  skipped, so pairing a pile of cards does not send a pile of notifications.
+
+The **Add card** form in the integration settings still works. Use it to rename
+a card or to play a playlist shuffled. A new card blinks red on the box and the
+form already has its UID.
+
+Audiobooks must come from the Music Assistant library
 (`library://audiobook/...`). Anything else would play, but never resume, so the
 form refuses it.
 
