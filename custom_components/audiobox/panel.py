@@ -2,18 +2,26 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+import hashlib
+from http import HTTPStatus
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Final
 
+from aiohttp import ClientError, ClientTimeout, web
 import probatio
+from yarl import URL
 
 from homeassistant.components import frontend, panel_custom, websocket_api
 from homeassistant.components.frontend import DATA_PANELS
-from homeassistant.components.http import StaticPathConfig
+from homeassistant.components.http import KEY_HASS, HomeAssistantView, StaticPathConfig
+from homeassistant.components.http.auth import async_sign_path
 from homeassistant.config_entries import ConfigSubentry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.loader import async_get_integration
 
@@ -33,6 +41,14 @@ STATIC_URL: Final = "/audiobox_static"
 MODULE: Final = "audiobox-panel.js"
 WEBCOMPONENT: Final = "audiobox-panel"
 
+MUSIC_ASSISTANT: Final = "music_assistant"
+LIBRARY_PAGE: Final = 500
+COVER_PATH: Final = "/api/audiobox/cover/{key}"
+COVER_SIZE: Final = "128"
+COVER_SIGNATURE_VALID: Final = timedelta(hours=24)
+COVER_CACHE: Final = "private, max-age=86400"
+COVER_TIMEOUT: Final = ClientTimeout(total=10)
+
 
 async def async_setup_panel_api(hass: HomeAssistant) -> None:
     """Serve the module and register the commands. Once per run, from `async_setup`."""
@@ -46,6 +62,8 @@ async def async_setup_panel_api(hass: HomeAssistant) -> None:
     websocket_api.async_register_command(hass, ws_subscribe)
     websocket_api.async_register_command(hass, ws_pair)
     websocket_api.async_register_command(hass, ws_unpair)
+    websocket_api.async_register_command(hass, ws_library)
+    hass.http.register_view(CoverView())
 
 
 async def async_register_panel(hass: HomeAssistant) -> None:
@@ -217,3 +235,114 @@ def ws_unpair(
         return
     hass.config_entries.async_remove_subentry(entry, subentry.subentry_id)
     connection.send_result(msg["id"])
+
+
+def cover_url(url: str) -> str:
+    """Ask Music Assistant's image proxy for a thumbnail, not the full cover."""
+    parsed = URL(url)
+    if not parsed.path.endswith("/imageproxy"):
+        return url
+    return str(parsed.update_query(size=COVER_SIZE))
+
+
+def _signed_cover(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    uri: str,
+    image: str | None,
+) -> str | None:
+    """A cover path the browser can load, over HTTPS too (ADR-38)."""
+    if not image:
+        return None
+    data = domain_data(hass)
+    data.images[uri] = image
+    thumbnail = cover_url(image)
+    key = hashlib.sha256(thumbnail.encode()).hexdigest()[:16]
+    data.covers[key] = thumbnail
+    return async_sign_path(
+        hass,
+        COVER_PATH.format(key=key),
+        COVER_SIGNATURE_VALID,
+        refresh_token_id=connection.refresh_token_id,
+    )
+
+
+@websocket_api.websocket_command(
+    {
+        probatio.Required("type"): "audiobox/library",
+        probatio.Required("media_type"): probatio.In(["audiobook", "playlist"]),
+    }
+)
+@websocket_api.require_admin
+@websocket_api.async_response
+async def ws_library(
+    hass: HomeAssistant, connection: websocket_api.ActiveConnection, msg: dict[str, Any]
+) -> None:
+    """The whole library of one media type, page by page (ADR-37)."""
+    if not (entries := hass.config_entries.async_loaded_entries(MUSIC_ASSISTANT)):
+        connection.send_error(
+            msg["id"], "music_assistant_not_loaded", "Music Assistant is not loaded"
+        )
+        return
+    items: list[dict[str, Any]] = []
+    offset = 0
+    while True:
+        try:
+            response = await hass.services.async_call(
+                MUSIC_ASSISTANT,
+                "get_library",
+                {
+                    "config_entry_id": entries[0].entry_id,
+                    "media_type": msg["media_type"],
+                    "limit": LIBRARY_PAGE,
+                    "offset": offset,
+                },
+                blocking=True,
+                return_response=True,
+            )
+        except HomeAssistantError as err:
+            connection.send_error(msg["id"], "library_failed", str(err))
+            return
+        page: list[dict[str, Any]] = (response or {}).get("items", [])
+        items.extend(
+            {
+                "uri": item["uri"],
+                "name": item["name"],
+                "image": _signed_cover(hass, connection, item["uri"], item.get("image")),
+            }
+            for item in page
+        )
+        if len(page) < LIBRARY_PAGE:
+            break
+        offset += LIBRARY_PAGE
+    connection.send_result(msg["id"], {"items": items})
+
+
+class CoverView(HomeAssistantView):
+    """Covers from Music Assistant, fetched by Home Assistant (ADR-38).
+
+    Only URLs the library handed out are fetched: this is not an open proxy.
+    """
+
+    url = COVER_PATH
+    name = "api:audiobox:cover"
+    requires_auth = True
+
+    async def get(self, request: web.Request, key: str) -> web.Response:
+        """Return the cover with this key."""
+        hass = request.app[KEY_HASS]
+        if (url := domain_data(hass).covers.get(key)) is None:
+            return web.Response(status=HTTPStatus.NOT_FOUND)
+        try:
+            async with async_get_clientsession(hass).get(
+                url, timeout=COVER_TIMEOUT
+            ) as response:
+                if not HTTPStatus.OK <= response.status < HTTPStatus.MULTIPLE_CHOICES:
+                    return web.Response(status=HTTPStatus.BAD_GATEWAY)
+                body = await response.read()
+                content_type = response.content_type
+        except (ClientError, TimeoutError):
+            return web.Response(status=HTTPStatus.BAD_GATEWAY)
+        return web.Response(
+            body=body, content_type=content_type, headers={"Cache-Control": COVER_CACHE}
+        )
