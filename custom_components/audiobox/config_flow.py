@@ -33,7 +33,7 @@ from homeassistant.helpers.selector import (
 )
 from homeassistant.util import slugify
 
-from .cards import find_card, media_type_from_uri, normalize_uid
+from .cards import card_errors, find_card, normalize_uid
 from .const import (
     CONF_BATTERY_ENTITY,
     CONF_CARD_ENTITY,
@@ -53,14 +53,10 @@ from .const import (
     CONF_VOLUME_ENTITY,
     DOMAIN,
     ENTITY_KEYS,
-    LIBRARY_AUDIOBOOK_PREFIX,
-    MEDIA_TYPE_AUDIOBOOK,
-    MEDIA_TYPE_PLAYLIST,
     MQTT_PREFIX_PATTERN,
     PLAYER_COLOURS,
     SUBENTRY_BOX,
     SUBENTRY_CARD,
-    UID_PATTERN,
 )
 from .models import resolve_entity, to_registry_id
 
@@ -140,24 +136,10 @@ def _card_data(
     entry: ConfigEntry, user_input: dict[str, Any], current_uid: str | None
 ) -> tuple[dict[str, Any], dict[str, str]]:
     """Validate the card form. Returns the data to store and the form errors."""
-    errors: dict[str, str] = {}
-
     uid = normalize_uid(user_input[CONF_UID])
-    if not UID_PATTERN.fullmatch(uid):
-        errors[CONF_UID] = "invalid_uid"
-    elif uid != current_uid and find_card(entry, uid) is not None:
-        errors[CONF_UID] = "uid_taken"
-
     media = dict(user_input[CONF_MEDIA])
     media_id: str = media.get("media_content_id", "")
-    media_type = media_type_from_uri(media_id)
-    if media_type not in (MEDIA_TYPE_AUDIOBOOK, MEDIA_TYPE_PLAYLIST):
-        errors[CONF_MEDIA] = "unsupported_media"
-    elif media_type == MEDIA_TYPE_AUDIOBOOK and not media_id.startswith(
-        LIBRARY_AUDIOBOOK_PREFIX
-    ):
-        # Plays, but never resumes: the one mistake that breaks the whole box.
-        errors[CONF_MEDIA] = "not_library_audiobook"
+    errors = card_errors(entry, uid, media_id, current_uid)
 
     name = (
         (user_input.get(CONF_NAME) or "").strip()
