@@ -21,6 +21,7 @@ from .models import (
     AudioboxRuntime,
     box_config_from_subentry,
 )
+from .panel import async_register_panel, async_remove_panel, async_setup_panel_api
 
 PLATFORMS = [Platform.SELECT]
 
@@ -30,6 +31,7 @@ CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Keep what the pairing panel needs across entry reloads."""
     hass.data.setdefault(DATA_AUDIOBOX, AudioboxData())
+    await async_setup_panel_api(hass)
     return True
 
 
@@ -49,6 +51,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: AudioboxConfigEntry) -> 
     for controller in runtime.boxes.values():
         await controller.async_start()
     entry.async_on_unload(entry.add_update_listener(_async_update_listener))
+    await async_register_panel(hass)
     return True
 
 
@@ -59,6 +62,11 @@ async def async_unload_entry(hass: HomeAssistant, entry: AudioboxConfigEntry) ->
         for controller in entry.runtime_data.boxes.values():
             controller.async_stop()
     return unloaded
+
+
+async def async_remove_entry(hass: HomeAssistant, entry: AudioboxConfigEntry) -> None:
+    """Take the panel out of the sidebar."""
+    async_remove_panel(hass)
 
 
 async def _async_update_listener(

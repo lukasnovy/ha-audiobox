@@ -112,6 +112,7 @@ class AudioboxData:
     covers: dict[str, str] = field(default_factory=dict)
     # Media URI -> Music Assistant image URL, for a paired card's thumbnail.
     images: dict[str, str] = field(default_factory=dict)
+    static_registered: bool = False
 
 
 DATA_AUDIOBOX: HassKey[AudioboxData] = HassKey(DOMAIN)
