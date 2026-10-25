@@ -28,12 +28,13 @@ from homeassistant.core import (
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_call_later, async_track_state_change_event
 from homeassistant.util import dt as dt_util
 
 from . import const
 from .cards import find_card, normalize_uid
-from .models import AudioboxConfigEntry, BoxConfig
+from .models import AudioboxConfigEntry, BoxConfig, Tap, domain_data
 from .notifications import async_notify
 
 _LOGGER = logging.getLogger(__name__)
@@ -300,6 +301,10 @@ class BoxController:
             self._schedule(self._async_card_out, "card out")
             return
         uid = normalize_uid(new.state)
+        domain_data(self.hass).last_tap = Tap(
+            uid, self.config.subentry_id, self.config.name, dt_util.utcnow()
+        )
+        async_dispatcher_send(self.hass, const.SIGNAL_PANEL_UPDATE)
         self._cancel_session_timer()
         self._schedule(partial(self._async_play_card, uid), "play card")
 
@@ -319,7 +324,9 @@ class BoxController:
         if card is None:
             self.entry.runtime_data.last_unknown_uid = uid
             await self._async_flash("red", 3)
-            self._notify("unknown_card", uid=uid)
+            # ADR-42: while cards are being paired, the red flash is enough.
+            if domain_data(self.hass).panel_subscribers == 0:
+                self._notify("unknown_card", uid=uid)
             return
 
         if not self._available(player):

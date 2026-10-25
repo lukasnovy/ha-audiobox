@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass, field
+from datetime import datetime
 import logging
 from typing import TYPE_CHECKING, Any
 
@@ -11,6 +12,7 @@ from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import CONF_NAME
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
+from homeassistant.util.hass_dict import HassKey
 
 from .const import (
     CONF_BATTERY_ENTITY,
@@ -25,6 +27,7 @@ from .const import (
     CONF_PLAYER_NAME,
     CONF_PLAYERS,
     CONF_VOLUME_ENTITY,
+    DOMAIN,
 )
 
 if TYPE_CHECKING:
@@ -87,6 +90,36 @@ class AudioboxRuntime:
 
 
 type AudioboxConfigEntry = ConfigEntry[AudioboxRuntime]
+
+
+@dataclass(frozen=True, slots=True)
+class Tap:
+    """A card put on a box, known or not."""
+
+    uid: str
+    box_subentry_id: str
+    box_name: str
+    at: datetime
+
+
+@dataclass
+class AudioboxData:
+    """What the integration keeps across entry reloads, for the pairing panel."""
+
+    last_tap: Tap | None = None
+    panel_subscribers: int = 0
+    # Cover key -> URL fetched by the cover view.
+    covers: dict[str, str] = field(default_factory=dict)
+    # Media URI -> Music Assistant image URL, for a paired card's thumbnail.
+    images: dict[str, str] = field(default_factory=dict)
+
+
+DATA_AUDIOBOX: HassKey[AudioboxData] = HassKey(DOMAIN)
+
+
+def domain_data(hass: HomeAssistant) -> AudioboxData:
+    """Return the integration's data, created in `async_setup`."""
+    return hass.data[DATA_AUDIOBOX]
 
 
 def box_config_from_subentry(

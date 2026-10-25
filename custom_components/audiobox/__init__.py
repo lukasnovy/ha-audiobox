@@ -8,12 +8,29 @@ from homeassistant.components import mqtt
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryNotReady
+from homeassistant.helpers import config_validation as cv
+from homeassistant.helpers.dispatcher import async_dispatcher_send
+from homeassistant.helpers.typing import ConfigType
 
 from .box import BoxController
-from .const import SUBENTRY_BOX
-from .models import AudioboxConfigEntry, AudioboxRuntime, box_config_from_subentry
+from .const import DOMAIN, SIGNAL_PANEL_UPDATE, SUBENTRY_BOX
+from .models import (
+    DATA_AUDIOBOX,
+    AudioboxConfigEntry,
+    AudioboxData,
+    AudioboxRuntime,
+    box_config_from_subentry,
+)
 
 PLATFORMS = [Platform.SELECT]
+
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
+
+
+async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
+    """Keep what the pairing panel needs across entry reloads."""
+    hass.data.setdefault(DATA_AUDIOBOX, AudioboxData())
+    return True
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: AudioboxConfigEntry) -> bool:
@@ -51,6 +68,7 @@ async def _async_update_listener(
 
     Adding or editing a card must not cancel a box's pending session timer.
     """
+    async_dispatcher_send(hass, SIGNAL_PANEL_UPDATE)
     if _snapshot(entry) != entry.runtime_data.snapshot:
         await hass.config_entries.async_reload(entry.entry_id)
 

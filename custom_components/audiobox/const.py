@@ -46,6 +46,9 @@ MEDIA_TYPE_AUDIOBOOK: Final = "audiobook"
 MEDIA_TYPE_PLAYLIST: Final = "playlist"
 LIBRARY_AUDIOBOOK_PREFIX: Final = "library://audiobook/"
 
+# Sent after every tap and every change of the entry or its subentries.
+SIGNAL_PANEL_UPDATE: Final = "audiobox_panel_update"
+
 # What the box publishes
 NO_CARD: Final = "none"
 BUTTON_TOPIC: Final = "{prefix}/event/button"
