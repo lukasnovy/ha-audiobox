@@ -86,6 +86,10 @@ const STRINGS = {
   },
 };
 
+// Cover links are signed for 24 hours. An expired one counts as a failed login,
+// so a library is reloaded well before that, and after every Home Assistant start.
+const LIBRARY_MAX_AGE = 12 * 60 * 60 * 1000;
+
 const STORAGE = {
   search: "audiobox.search",
   type: "audiobox.type",
@@ -270,6 +274,8 @@ class AudioboxPanel extends HTMLElement {
     this._cards = [];
     this._tap = null;
     this._libraries = {};
+    this._loadedAt = {};
+    this._run = null;
     this._libraryError = {};
     this._loading = {};
     this._search = load(STORAGE.search, "");
@@ -329,14 +335,35 @@ class AudioboxPanel extends HTMLElement {
       });
     }
     if (this._ageTimer === undefined) {
-      this._ageTimer = setInterval(() => this._renderTap(), 30000);
+      this._ageTimer = setInterval(() => {
+        this._renderTap();
+        this._dropStaleLibraries(false);
+      }, 30000);
     }
+    this._dropStaleLibraries(false);
     this._loadLibrary(this._type, false);
+  }
+
+  // Forget libraries whose cover links may have expired; reload the one on screen.
+  _dropStaleLibraries(all) {
+    let dropped = false;
+    for (const type of Object.keys(this._libraries)) {
+      if (all || Date.now() - this._loadedAt[type] > LIBRARY_MAX_AGE) {
+        if (this._rowCache) {
+          for (const item of this._libraries[type]) this._rowCache.delete(item);
+        }
+        delete this._libraries[type];
+        dropped = dropped || type === this._type;
+      }
+    }
+    if (dropped && this._hass) this._loadLibrary(this._type, false);
   }
 
   // --- data ---------------------------------------------------------------
 
   _onState(state) {
+    if (this._run !== null && state.run !== this._run) this._dropStaleLibraries(true);
+    this._run = state.run;
     const previous = this._tap;
     this._cards = state.cards;
     this._tap = state.last_tap;
@@ -366,6 +393,7 @@ class AudioboxPanel extends HTMLElement {
       this._libraries[type] = result.items
         .slice()
         .sort((a, b) => this._collator.compare(a.name, b.name));
+      this._loadedAt[type] = Date.now();
     } catch (err) {
       this._libraryError[type] = err;
     } finally {

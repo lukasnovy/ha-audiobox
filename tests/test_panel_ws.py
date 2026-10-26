@@ -209,3 +209,19 @@ async def test_admin_only(
         assert not result["success"]
         assert result["error"]["code"] == "unauthorized"
     assert _card_count(loaded) == 2
+
+
+async def test_run_id_survives_reload(
+    hass: HomeAssistant, loaded: MockConfigEntry, hass_ws_client: WebSocketGenerator
+) -> None:
+    """The panel drops its cover links when Home Assistant restarts, not on a reload."""
+    client = await hass_ws_client(hass)
+    _, state = await _subscribe(client)
+    run = state["run"]
+    assert run == domain_data(hass).run_id
+    assert len(run) == 16
+
+    assert await hass.config_entries.async_reload(loaded.entry_id)
+    await settle(hass)
+    assert domain_data(hass).run_id == run
+    assert domain_data(hass).panel_subscribers == 1

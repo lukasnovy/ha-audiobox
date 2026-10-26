@@ -102,8 +102,10 @@ def _panel_state(hass: HomeAssistant) -> dict[str, Any]:
         for subentry in entry.get_subentries_of_type(SUBENTRY_CARD):
             card = card_from_subentry(subentry)
             cards.append({"uid": card.uid, "name": card.name, "media_id": card.media_id})
-    tap = domain_data(hass).last_tap
+    data = domain_data(hass)
+    tap = data.last_tap
     return {
+        "run": data.run_id,
         "cards": cards,
         "last_tap": None
         if tap is None

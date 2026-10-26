@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import datetime
 import logging
+import secrets
 from typing import TYPE_CHECKING, Any
 
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
@@ -112,6 +113,8 @@ class AudioboxData:
     covers: dict[str, str] = field(default_factory=dict)
     # Media URI -> Music Assistant image URL, for a paired card's thumbnail.
     images: dict[str, str] = field(default_factory=dict)
+    # New on every Home Assistant start, when the cover signatures stop working.
+    run_id: str = field(default_factory=lambda: secrets.token_hex(8))
 
 
 DATA_AUDIOBOX: HassKey[AudioboxData] = HassKey(DOMAIN)
