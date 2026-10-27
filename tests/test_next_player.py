@@ -95,8 +95,8 @@ async def test_moves_a_playing_book_as_its_user(
     assert seek.data == {"entity_id": KIDS_ROOM, "seek_position": 600}
     assert hass.states.get(KIDS_ROOM).state == STATE_PLAYING
     assert hass.states.get(SELECT).state == "Kids room"
-    [volume] = services["media_player.volume_set"]
-    assert volume.data == {"entity_id": KIDS_ROOM, "volume_level": 0.25}
+    # The new player keeps its own volume; the knob follows it (test_volume.py).
+    assert services["media_player.volume_set"] == []
     assert services.led_colours()[-1] == BLUE
 
 
@@ -179,8 +179,8 @@ async def test_moves_a_playing_playlist(
         "auto_play": True,
     }
     assert hass.states.get(SELECT).state == "Kids room"
-    [volume] = services["media_player.volume_set"]
-    assert volume.data == {"entity_id": KIDS_ROOM, "volume_level": 0.25}
+    # The new player keeps its own volume; the knob follows it (test_volume.py).
+    assert services["media_player.volume_set"] == []
     assert services.led_colours()[-1] == BLUE
 
 

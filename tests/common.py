@@ -203,6 +203,7 @@ class Services:
             "shuffle_set",
         ):
             self.register("media_player", service)
+        self.register("number", "set_value", self._set_number)
         self.register("light", "turn_on")
         self.register("light", "turn_off")
         self.register("notify", "send_message")
@@ -239,11 +240,21 @@ class Services:
 
     @callback
     def _transfer(self, call: ServiceCall) -> None:
+        target = self.hass.states.get(call.data["entity_id"])
         self.hass.states.async_set(
             call.data["entity_id"],
             STATE_PLAYING if call.data["auto_play"] else STATE_PAUSED,
+            target.attributes if target else None,
         )
         self.hass.states.async_set(call.data["source_player"], STATE_IDLE)
+
+    @callback
+    def _set_number(self, call: ServiceCall) -> None:
+        entity_id = call.data["entity_id"]
+        old = self.hass.states.get(entity_id)
+        self.hass.states.async_set(
+            entity_id, str(call.data["value"]), old.attributes if old else None
+        )
 
     def __getitem__(self, key: str) -> list[ServiceCall]:
         """Calls made to `domain.service`."""

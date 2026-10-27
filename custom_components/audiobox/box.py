@@ -65,6 +65,9 @@ class BoxController:
         self._battery_notified = False
         self._led_off: CALLBACK_TYPE | None = None
         self._volume_task: asyncio.Task[None] | None = None
+        # Runs while the knob is being turned: the player's late reports of
+        # earlier levels must not pull the knob back.
+        self._knob_quiet: CALLBACK_TYPE | None = None
 
     # --- selection ---------------------------------------------------------
 
@@ -93,6 +96,7 @@ class BoxController:
         for player in self.config.players:
             if player.name == name:
                 self._selected = player.entity_id
+                self._show_selected()
                 return
 
     @callback
@@ -106,8 +110,11 @@ class BoxController:
     @callback
     def _set_selection(self, entity_id: str) -> None:
         self._selected = entity_id
+        # A knob turned for the previous player says nothing about this one.
+        self._cancel_knob_quiet()
         for listener in list(self._listeners):
             listener()
+        self._show_selected()
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -131,6 +138,14 @@ class BoxController:
                     self.hass, [self.config.battery_entity], self._battery_changed
                 )
             )
+        if self.config.players:
+            self._unsubs.append(
+                async_track_state_change_event(
+                    self.hass,
+                    [player.entity_id for player in self.config.players],
+                    self._player_changed,
+                )
+            )
         self._unsubs.append(
             await mqtt.async_subscribe(
                 self.hass,
@@ -139,6 +154,7 @@ class BoxController:
                 qos=1,
             )
         )
+        self._show_selected()
 
     @callback
     def async_stop(self) -> None:
@@ -150,6 +166,7 @@ class BoxController:
             if timer is not None:
                 timer()
         self._session_timer = self._battery_timer = self._led_off = None
+        self._cancel_knob_quiet()
 
     # --- plumbing ----------------------------------------------------------
 
@@ -552,12 +569,7 @@ class BoxController:
                 await self._async_flash("red", 2)
                 return
 
-        # What you feel on the knob is what you hear on the new player.
-        await self._async_try_call(
-            MEDIA_PLAYER,
-            "volume_set",
-            {ATTR_ENTITY_ID: new, "volume_level": self._knob_volume() / 100},
-        )
+        # The new player keeps its volume; the knob and the ring take it over.
         self._set_selection(new)
         colour = next(
             player.colour for player in self.config.players if player.entity_id == new
@@ -625,16 +637,112 @@ class BoxController:
             new, STATE_PLAYING, const.TRANSFER_CONFIRM_SECONDS
         )
 
-    def _knob_volume(self) -> float:
+    # --- what the box shows: the selected player's colour and volume -----------
+
+    @callback
+    def _show_selected(self) -> None:
+        self.entry.async_create_background_task(
+            self.hass,
+            self._async_show_selected(),
+            f"audiobox {self.config.name} show player",
+        )
+
+    async def _async_show_selected(self) -> None:
+        """The ring takes the selected player's colour, the knob its volume."""
+        colour = next(
+            (
+                player.colour
+                for player in self.config.players
+                if player.entity_id == self._selected
+            ),
+            None,
+        )
+        if colour is not None:
+            await mqtt.async_publish(
+                self.hass,
+                const.PLAYER_COLOUR_TOPIC.format(prefix=self.config.mqtt_prefix),
+                ",".join(str(channel) for channel in const.COLOURS[colour]),
+                qos=1,
+                retain=True,
+            )
+        await self._async_show_volume()
+
+    def _shown_volume(self) -> int | None:
+        """The selected player's volume as the knob can show it, None if unknown."""
+        state = self.hass.states.get(self._selected) if self._selected else None
+        level = state.attributes.get("volume_level") if state is not None else None
+        if level is None:
+            return None
+        shown = round(float(level) * 100)
+        knob = (
+            self.hass.states.get(self.config.volume_entity)
+            if self.config.volume_entity
+            else None
+        )
+        if knob is not None and (ceiling := knob.attributes.get("max")) is not None:
+            # The knob's ceiling is hearing safety; the box cannot show more.
+            shown = min(shown, int(ceiling))
+        return shown
+
+    def _knob_level(self) -> float | None:
         state = (
             self.hass.states.get(self.config.volume_entity)
             if self.config.volume_entity
             else None
         )
+        if state is None:
+            return None
         try:
-            return float(state.state) if state is not None else const.DEFAULT_VOLUME
+            return float(state.state)
         except ValueError:
-            return const.DEFAULT_VOLUME
+            return None
+
+    async def _async_show_volume(self) -> None:
+        if self._knob_quiet is not None or not self.config.volume_entity:
+            return
+        shown = self._shown_volume()
+        knob = self._knob_level()
+        if shown is None or knob is None or round(knob) == shown:
+            return
+        await self._async_try_call(
+            "number",
+            "set_value",
+            {ATTR_ENTITY_ID: self.config.volume_entity, "value": shown},
+        )
+
+    @callback
+    def _player_changed(self, event: Event[EventStateChangedData]) -> None:
+        """The selected player's volume changed, perhaps in the Music Assistant app."""
+        if event.data["entity_id"] != self._selected:
+            return
+        old, new = event.data["old_state"], event.data["new_state"]
+        if new is None or (
+            old is not None
+            and old.attributes.get("volume_level")
+            == new.attributes.get("volume_level")
+        ):
+            return
+        self.entry.async_create_background_task(
+            self.hass,
+            self._async_show_volume(),
+            f"audiobox {self.config.name} show volume",
+        )
+
+    @callback
+    def _cancel_knob_quiet(self) -> None:
+        if self._knob_quiet is not None:
+            self._knob_quiet()
+            self._knob_quiet = None
+
+    @callback
+    def _knob_quiet_over(self, _now: datetime) -> None:
+        self._knob_quiet = None
+        # Whatever the player settled on is what the knob shows.
+        self.entry.async_create_background_task(
+            self.hass,
+            self._async_show_volume(),
+            f"audiobox {self.config.name} show volume",
+        )
 
     @callback
     def _volume_changed(self, event: Event[EventStateChangedData]) -> None:
@@ -649,6 +757,13 @@ class BoxController:
         player = self._selected
         if level < 0 or not self._available(player):
             return
+        if round(level) == self._shown_volume():
+            # The knob shows the player's own volume: nothing to send back.
+            return
+        self._cancel_knob_quiet()
+        self._knob_quiet = async_call_later(
+            self.hass, const.KNOB_QUIET, self._knob_quiet_over
+        )
         if self._volume_task is not None and not self._volume_task.done():
             self._volume_task.cancel()
         self._volume_task = self.entry.async_create_background_task(

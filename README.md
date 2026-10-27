@@ -34,6 +34,10 @@ The integration works with any MQTT device that offers:
 Buttons are published as events on `<prefix>/event/button`, QoS 1, with the
 payload `{"button": "playpause"}`, `"back"`, `"fwd"` or `"encoder_hold"`.
 
+The integration keeps the volume knob at the selected player's volume, and
+publishes the selected player's colour, retained, as `r,g,b` on
+`<prefix>/player_colour` (for example `0,80,255`). A box can show both.
+
 ## Install
 
 1. HACS → three-dot menu → Custom repositories.
@@ -84,8 +88,8 @@ Adding or editing a card never interrupts a box that is playing.
 | Play/pause | Toggle, only with a card in the tray |
 | Back / forward | 30 s for audiobooks, previous / next track for playlists |
 | Back held 15 s (`back_restart`) | The audiobook from its beginning. Playlists ignore it |
-| Knob turn | Volume of the selected player |
-| Knob long press | Move playback to the next player. A player another box has selected is skipped. A book starts again there as the box's Music Assistant user, at the position it left off |
+| Knob turn | Volume of the selected player. A change made elsewhere, in the Music Assistant app for example, moves the knob's value too |
+| Knob long press | Move playback to the next player, which keeps its own volume; the knob takes it over. A player another box has selected is skipped. A book starts again there as the box's Music Assistant user, at the position it left off |
 
 | LED | Meaning |
 |---|---|

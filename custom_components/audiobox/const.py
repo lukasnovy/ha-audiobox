@@ -53,6 +53,9 @@ SIGNAL_PANEL_UPDATE: Final = "audiobox_panel_update"
 NO_CARD: Final = "none"
 BUTTON_TOPIC: Final = "{prefix}/event/button"
 
+# What the box reads: the selected player's colour as "r,g,b", retained.
+PLAYER_COLOUR_TOPIC: Final = "{prefix}/player_colour"
+
 # Timings. Code reads them as `const.NAME` so that tests can patch them.
 SESSION_END = timedelta(minutes=10)
 SEEK_STEP = 30
@@ -60,9 +63,9 @@ END_CLAMP = 5
 SETTLE_SECONDS = 1.0
 PLAY_CONFIRM_SECONDS = 10.0
 TRANSFER_CONFIRM_SECONDS = 5.0
+KNOB_QUIET = 3.0
 BATTERY_LOW_PERCENT = 20
 BATTERY_LOW_FOR = timedelta(minutes=5)
-DEFAULT_VOLUME = 25
 
 LED_BRIGHTNESS: Final = 120
 FEEDBACK_COLOURS: Final = {
