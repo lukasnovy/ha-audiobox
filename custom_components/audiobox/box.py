@@ -68,6 +68,8 @@ class BoxController:
         # Runs while the knob is being turned: the player's late reports of
         # earlier levels must not pull the knob back.
         self._knob_quiet: CALLBACK_TYPE | None = None
+        # The choices payload last sent to the box, so it is sent only on a change.
+        self._shown_choices: str | None = None
 
     # --- selection ---------------------------------------------------------
 
@@ -440,7 +442,8 @@ class BoxController:
     @callback
     def _button_received(self, msg: mqtt.ReceiveMessage) -> None:
         try:
-            button = json.loads(msg.payload)["button"]
+            payload = json.loads(msg.payload)
+            button = payload["button"]
         except (ValueError, TypeError, KeyError):
             _LOGGER.debug(
                 "%s: ignoring button payload %r", self.config.name, msg.payload
@@ -453,8 +456,10 @@ class BoxController:
             self._schedule(partial(self._async_seek, offset), "seek")
         elif button == "back_restart":
             self._schedule(self._async_restart, "restart")
-        elif button == "encoder_hold":
-            self._schedule(self._async_next_player, "next player")
+        elif button == "select_player" and isinstance(
+            index := payload.get("player"), int
+        ):
+            self._schedule(partial(self._async_select_player, index), "select player")
         else:
             _LOGGER.debug("%s: unknown button %r", self.config.name, button)
 
@@ -536,30 +541,70 @@ class BoxController:
 
     # --- players and volume ----------------------------------------------------
 
-    async def _async_next_player(self) -> None:
-        """Move playback to the next free player (2026-09-24 section 7, ADR-24)."""
+    def _choices(self) -> list[int]:
+        """Players a held knob offers, as indexes into the box's list.
+
+        The selected player first, then every free one after it in list order
+        (ADR-24): available, and not selected by another box.
+        """
         ids = [player.entity_id for player in self.config.players]
         if not ids:
-            await self._async_flash("amber", 2)
-            return
-        current = self._selected if self._selected in ids else ids[0]
+            return []
+        start = ids.index(self._selected) if self._selected in ids else 0
         taken = {
             box.selected_player
             for box in self.entry.runtime_data.boxes.values()
             if box is not self
         }
-        start = ids.index(current)
-        candidates = [
-            entity_id
-            for step in range(1, len(ids))
-            if self._available(entity_id := ids[(start + step) % len(ids)])
-            and entity_id not in taken
+        order = [(start + step) % len(ids) for step in range(len(ids))]
+        return order[:1] + [
+            index
+            for index in order[1:]
+            if self._available(ids[index]) and ids[index] not in taken
         ]
-        if not candidates:
+
+    @callback
+    def _show_choices(self) -> None:
+        """Tell the box which players a held knob offers, when that changed."""
+        payload = ";".join(
+            f"{index}:"
+            + ",".join(
+                str(channel)
+                for channel in const.COLOURS[self.config.players[index].colour]
+            )
+            for index in self._choices()
+        )
+        if payload == self._shown_choices:
+            return
+        self._shown_choices = payload
+        self.entry.async_create_background_task(
+            self.hass,
+            mqtt.async_publish(
+                self.hass,
+                const.PLAYER_CHOICES_TOPIC.format(prefix=self.config.mqtt_prefix),
+                payload,
+                qos=1,
+                retain=True,
+            ),
+            f"audiobox {self.config.name} show choices",
+        )
+
+    async def _async_select_player(self, index: int) -> None:
+        """Move playback to the player the knob was let go on (2026-10-27).
+
+        The box cycles through the choices it was sent; one may have gone
+        since, so they are checked again. Only with a card in the tray.
+        """
+        if not self._card_in_tray():
+            await self._async_flash("red", 1)
+            return
+        if index not in self._choices():
             await self._async_flash("amber", 2)
             return
+        current, new = self._selected, self.config.players[index].entity_id
+        if new == current:
+            return
 
-        new = candidates[0]
         was_playing = self._is(current, STATE_PLAYING)
         if was_playing or self._is(current, STATE_PAUSED):
             card = self._current_card()
@@ -648,6 +693,9 @@ class BoxController:
             self._async_show_selected(),
             f"audiobox {self.config.name} show player",
         )
+        # A player selected here is taken for every other box.
+        for box in self.entry.runtime_data.boxes.values():
+            box._show_choices()
 
     async def _async_show_selected(self) -> None:
         """The ring takes the selected player's colour, the knob its volume."""
@@ -714,7 +762,9 @@ class BoxController:
 
     @callback
     def _player_changed(self, event: Event[EventStateChangedData]) -> None:
-        """The selected player's volume changed, perhaps in the Music Assistant app."""
+        """A player changed, perhaps the selected one's volume in the MA app."""
+        # A player that comes or goes changes what a held knob offers.
+        self._show_choices()
         if event.data["entity_id"] != self._selected:
             return
         old, new = event.data["old_state"], event.data["new_state"]

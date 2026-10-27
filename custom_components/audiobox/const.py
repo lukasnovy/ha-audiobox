@@ -55,6 +55,9 @@ BUTTON_TOPIC: Final = "{prefix}/event/button"
 
 # What the box reads: the selected player's colour as "r,g,b", retained.
 PLAYER_COLOUR_TOPIC: Final = "{prefix}/player_colour"
+# What the box reads: the players a held knob offers, retained, the selected one
+# first, as "index:r,g,b;..." where index is the player's place in the box's list.
+PLAYER_CHOICES_TOPIC: Final = "{prefix}/player_choices"
 
 # Timings. Code reads them as `const.NAME` so that tests can patch them.
 SESSION_END = timedelta(minutes=10)

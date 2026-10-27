@@ -32,11 +32,16 @@ The integration works with any MQTT device that offers:
 | LED | light with RGB | |
 
 Buttons are published as events on `<prefix>/event/button`, QoS 1, with the
-payload `{"button": "playpause"}`, `"back"`, `"fwd"` or `"encoder_hold"`.
+payload `{"button": "playpause"}`, `"back"`, `"fwd"`, `"back_restart"`, or
+`{"button": "select_player", "player": 2}` with the player's index in the box's
+list.
 
 The integration keeps the volume knob at the selected player's volume, and
 publishes the selected player's colour, retained, as `r,g,b` on
 `<prefix>/player_colour` (for example `0,80,255`). A box can show both.
+It also publishes, retained, the players a held knob offers on
+`<prefix>/player_choices`: the selected one first, then the free ones after it,
+as `index:r,g,b` joined by `;` (for example `1:0,80,255;2:160,0,255;0:255,255,255`).
 
 ## Install
 
@@ -89,14 +94,14 @@ Adding or editing a card never interrupts a box that is playing.
 | Back / forward | 30 s for audiobooks, previous / next track for playlists |
 | Back held 15 s (`back_restart`) | The audiobook from its beginning. Playlists ignore it |
 | Knob turn | Volume of the selected player. A change made elsewhere, in the Music Assistant app for example, moves the knob's value too |
-| Knob long press | Move playback to the next player, which keeps its own volume; the knob takes it over. A player another box has selected is skipped. A book starts again there as the box's Music Assistant user, at the position it left off |
+| Knob held 7 s | The ring shows the selected player's colour, then every 4 s the next free player's, round and round. Letting go picks the one shown and moves playback there, paused if it was paused. The new player keeps its own volume; the knob takes it over. A player another box has selected is not offered. A book starts again there as the box's Music Assistant user, at the position it left off. Only with a card in the tray |
 
 | LED | Meaning |
 |---|---|
 | Green | Card recognised, playing |
 | Red | Unknown card, nothing to do, or playback failed |
 | Amber | The selected player is unavailable, or no other player is free |
-| Player colour | The player just selected with a long press |
+| Player colour | The player just picked with the knob |
 
 ## Development
 

@@ -39,9 +39,12 @@ def _volume(hass: HomeAssistant, player: str, level: float) -> None:
     )
 
 
-async def _hold(hass: HomeAssistant) -> None:
+async def _pick_kids_room(hass: HomeAssistant) -> None:
+    """Let go of the held knob on the second player."""
     async_fire_mqtt_message(
-        hass, "audiobox1/event/button", json.dumps({"button": "encoder_hold"})
+        hass,
+        "audiobox1/event/button",
+        json.dumps({"button": "select_player", "player": 1}),
     )
     await settle(hass)
 
@@ -59,7 +62,7 @@ async def _knob(hass: HomeAssistant, value: str) -> None:
     await settle(hass)
 
 
-async def test_long_press_takes_the_new_players_volume(
+async def test_picked_player_takes_the_new_players_volume(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
     await insert(hass, PLAYLIST_UID)
@@ -67,7 +70,7 @@ async def test_long_press_takes_the_new_players_volume(
     await _knob(hass, "60")
     services.calls.clear()
 
-    await _hold(hass)
+    await _pick_kids_room(hass)
     assert hass.states.get(SELECT).state == "Kids room"
     assert services["media_player.volume_set"] == []
     [shown] = services["number.set_value"]
@@ -75,7 +78,7 @@ async def test_long_press_takes_the_new_players_volume(
     assert hass.states.get(VOLUME).state == "20"
 
 
-async def test_long_press_sends_the_players_colour(
+async def test_picked_player_sends_the_players_colour(
     hass: HomeAssistant,
     loaded: MockConfigEntry,
     services: Services,
@@ -89,14 +92,17 @@ async def test_long_press_sends_the_players_colour(
         ]
 
     assert colours() == [("255,255,255", 1, True)]
-    await _hold(hass)
+    await insert(hass, PLAYLIST_UID)
+    await _pick_kids_room(hass)
     assert colours()[-1] == ("0,80,255", 1, True)
 
 
 async def test_player_without_a_volume_leaves_the_knob(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
-    await _hold(hass)
+    await insert(hass, PLAYLIST_UID)
+    services.calls.clear()
+    await _pick_kids_room(hass)
     assert services["number.set_value"] == []
 
 
