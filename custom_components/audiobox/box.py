@@ -33,7 +33,7 @@ from homeassistant.helpers.event import async_call_later, async_track_state_chan
 from homeassistant.util import dt as dt_util
 
 from . import const
-from .cards import find_card, normalize_uid
+from .cards import Card, find_card, normalize_uid
 from .models import AudioboxConfigEntry, BoxConfig, Tap, domain_data
 from .notifications import async_notify
 
@@ -453,19 +453,34 @@ class BoxController:
         player = self._selected
         if not player:
             return
-        card = (
-            find_card(self.entry, self._last_card)
-            if self._last_card != const.NO_CARD
-            else None
-        )
+        card = self._current_card()
         if card is not None and card.media_type == const.MEDIA_TYPE_PLAYLIST:
             service = "media_next_track" if offset > 0 else "media_previous_track"
             await self._async_call(MEDIA_PLAYER, service, {ATTR_ENTITY_ID: player})
             return
 
+        if self.hass.states.get(player) is None:
+            return
+        position, duration = self._position(player)
+        await self._async_call(
+            MEDIA_PLAYER,
+            "media_seek",
+            {
+                ATTR_ENTITY_ID: player,
+                "seek_position": self._clamp(position + offset, duration),
+            },
+        )
+
+    def _current_card(self) -> Card | None:
+        if self._last_card == const.NO_CARD:
+            return None
+        return find_card(self.entry, self._last_card)
+
+    def _position(self, player: str) -> tuple[float, float]:
+        """Where `player` is now in its item, and the item's length, in seconds."""
         state = self.hass.states.get(player)
         if state is None:
-            return
+            return 0, 0
         position = float(state.attributes.get("media_position") or 0)
         duration = float(state.attributes.get("media_duration") or 0)
         # media_position is a snapshot taken at media_position_updated_at.
@@ -477,15 +492,15 @@ class BoxController:
             if updated is not None and state.state == STATE_PLAYING
             else 0
         )
-        target = max(position + drift + offset, 0)
+        return position + drift, duration
+
+    @staticmethod
+    def _clamp(target: float, duration: float) -> float:
+        target = max(target, 0)
         if duration > 0:
             # Short of the end, so +30 s does not mark the book finished.
             target = min(target, duration - const.END_CLAMP)
-        await self._async_call(
-            MEDIA_PLAYER,
-            "media_seek",
-            {ATTR_ENTITY_ID: player, "seek_position": target},
-        )
+        return target
 
     # --- players and volume ----------------------------------------------------
 
@@ -515,18 +530,12 @@ class BoxController:
         new = candidates[0]
         was_playing = self._is(current, STATE_PLAYING)
         if was_playing or self._is(current, STATE_PAUSED):
-            await self._async_try_call(
-                MUSIC_ASSISTANT,
-                "transfer_queue",
-                {
-                    ATTR_ENTITY_ID: new,
-                    "source_player": current,
-                    "auto_play": was_playing,
-                },
-            )
-            if was_playing and not await self._async_wait_for(
-                new, STATE_PLAYING, const.TRANSFER_CONFIRM_SECONDS
-            ):
+            card = self._current_card()
+            if card is not None and card.media_type == const.MEDIA_TYPE_AUDIOBOOK:
+                moved = await self._async_move_book(card, current, new, was_playing)
+            else:
+                moved = await self._async_move_queue(current, new, was_playing)
+            if not moved:
                 await self._async_flash("red", 2)
                 return
 
@@ -541,6 +550,67 @@ class BoxController:
             player.colour for player in self.config.players if player.entity_id == new
         )
         await self._async_flash(colour, 2)
+
+    async def _async_move_book(
+        self, card: Card, old: str, new: str, was_playing: bool
+    ) -> bool:
+        """Start the book again on `new` as the box's user, where it left off.
+
+        Not transfer_queue: Music Assistant 2.10 moves the items but keeps the
+        target queue's previous user, so the position went into the account of
+        whoever last played on that speaker.
+        """
+        if was_playing:
+            await self._async_try_call(
+                MEDIA_PLAYER, "media_pause", {ATTR_ENTITY_ID: old}
+            )
+            await asyncio.sleep(const.SETTLE_SECONDS)
+        position, duration = self._position(old)
+        # Stop writes the position into the box user's account and frees the speaker.
+        await self._async_try_call(MEDIA_PLAYER, "media_stop", {ATTR_ENTITY_ID: old})
+        try:
+            await self._async_call(
+                MUSIC_ASSISTANT,
+                "play_media",
+                {
+                    ATTR_ENTITY_ID: new,
+                    "media_id": card.media_id,
+                    "enqueue": "replace",
+                    "username": self.config.ma_user,
+                },
+            )
+        except HomeAssistantError as err:
+            _LOGGER.warning(
+                "%s: moving %s to %s failed: %s", self.config.name, card.name, new, err
+            )
+            return False
+        if not await self._async_wait_for(
+            new, STATE_PLAYING, const.PLAY_CONFIRM_SECONDS
+        ):
+            return False
+        # The account should hold this position, but a stale or finished one must not win.
+        if position > 0:
+            await self._async_try_call(
+                MEDIA_PLAYER,
+                "media_seek",
+                {ATTR_ENTITY_ID: new, "seek_position": self._clamp(position, duration)},
+            )
+        if not was_playing:
+            await self._async_try_call(
+                MEDIA_PLAYER, "media_pause", {ATTR_ENTITY_ID: new}
+            )
+        return True
+
+    async def _async_move_queue(self, old: str, new: str, was_playing: bool) -> bool:
+        """Anything that is not a book keeps Music Assistant's own transfer."""
+        await self._async_try_call(
+            MUSIC_ASSISTANT,
+            "transfer_queue",
+            {ATTR_ENTITY_ID: new, "source_player": old, "auto_play": was_playing},
+        )
+        return not was_playing or await self._async_wait_for(
+            new, STATE_PLAYING, const.TRANSFER_CONFIRM_SECONDS
+        )
 
     def _knob_volume(self) -> float:
         state = (

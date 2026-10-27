@@ -84,7 +84,7 @@ Adding or editing a card never interrupts a box that is playing.
 | Play/pause | Toggle, only with a card in the tray |
 | Back / forward | 30 s for audiobooks, previous / next track for playlists |
 | Knob turn | Volume of the selected player |
-| Knob long press | Move playback to the next player. A player another box has selected is skipped |
+| Knob long press | Move playback to the next player. A player another box has selected is skipped. A book starts again there as the box's Music Assistant user, at the position it left off |
 
 | LED | Meaning |
 |---|---|

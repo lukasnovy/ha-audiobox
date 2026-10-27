@@ -5,8 +5,9 @@ import json
 
 import pytest
 
-from homeassistant.const import STATE_PAUSED, STATE_UNAVAILABLE
-from homeassistant.core import HomeAssistant
+from homeassistant.const import STATE_PAUSED, STATE_PLAYING, STATE_UNAVAILABLE
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.util import dt as dt_util
 from pytest_homeassistant_custom_component.common import (
@@ -25,7 +26,9 @@ from .common import (
     BOX_PLAYER,
     KIDS_ROOM,
     LIVING_ROOM,
+    MA_USER,
     PLAYERS_ONE,
+    PLAYLIST_UID,
     RED,
     SELECT,
     VOLUME,
@@ -55,10 +58,119 @@ async def _select(hass: HomeAssistant, entity_id: str, option: str) -> None:
     )
 
 
-async def test_moves_a_playing_queue(
+def _at(hass: HomeAssistant, player: str, state: str, position: float) -> None:
+    """Give `player` a book position the way Music Assistant reports it."""
+    hass.states.async_set(
+        player,
+        state,
+        {
+            "media_position": position,
+            "media_duration": 3000,
+            "media_position_updated_at": dt_util.utcnow(),
+        },
+    )
+
+
+async def test_moves_a_playing_book_as_its_user(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
     await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PLAYING, 600)
+    await _hold(hass)
+    assert services["music_assistant.transfer_queue"] == []
+    assert [call.data for call in services["media_player.media_pause"]] == [
+        {"entity_id": BOX_PLAYER}
+    ]
+    assert [call.data for call in services["media_player.media_stop"]] == [
+        {"entity_id": BOX_PLAYER}
+    ]
+    [_, play] = services["music_assistant.play_media"]
+    assert play.data == {
+        "entity_id": KIDS_ROOM,
+        "media_id": BOOK_URI,
+        "enqueue": "replace",
+        "username": MA_USER,
+    }
+    [seek] = services["media_player.media_seek"]
+    assert seek.data == {"entity_id": KIDS_ROOM, "seek_position": 600}
+    assert hass.states.get(KIDS_ROOM).state == STATE_PLAYING
+    assert hass.states.get(SELECT).state == "Kids room"
+    [volume] = services["media_player.volume_set"]
+    assert volume.data == {"entity_id": KIDS_ROOM, "volume_level": 0.25}
+    assert services.led_colours()[-1] == BLUE
+
+
+async def test_moves_a_paused_book_and_keeps_it_paused(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PAUSED, 600)
+    await _hold(hass)
+    assert [call.data for call in services["media_player.media_pause"]] == [
+        {"entity_id": KIDS_ROOM}
+    ]
+    assert services["music_assistant.play_media"][-1].data["entity_id"] == KIDS_ROOM
+    assert services["media_player.media_seek"][0].data["seek_position"] == 600
+    assert hass.states.get(KIDS_ROOM).state == STATE_PAUSED
+    assert hass.states.get(SELECT).state == "Kids room"
+
+
+async def test_book_at_its_start_is_not_seeked(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PLAYING, 0)
+    await _hold(hass)
+    assert services["music_assistant.play_media"][-1].data["entity_id"] == KIDS_ROOM
+    assert services["media_player.media_seek"] == []
+
+
+async def test_book_near_its_end_is_not_finished(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PLAYING, 2999)
+    await _hold(hass)
+    assert services["media_player.media_seek"][0].data["seek_position"] == 2995
+
+
+async def test_failed_book_move_keeps_the_selection(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PLAYING, 600)
+
+    def refuse(call: ServiceCall) -> None:
+        raise HomeAssistantError("no such user")
+
+    services.register("music_assistant", "play_media", refuse)
+    await _hold(hass)
+    assert services["media_player.media_seek"] == []
+    assert hass.states.get(SELECT).state == "Box"
+    assert services.led_colours()[-1] == RED
+
+
+async def test_book_that_does_not_start_keeps_the_selection(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _at(hass, BOX_PLAYER, STATE_PLAYING, 600)
+    services.register("music_assistant", "play_media")
+    async_fire_mqtt_message(
+        hass, "audiobox1/event/button", json.dumps({"button": "encoder_hold"})
+    )
+    await hass.async_block_till_done()
+    async_fire_time_changed(hass, dt_util.utcnow() + timedelta(seconds=11))
+    await settle(hass)
+    assert services["media_player.media_seek"] == []
+    assert hass.states.get(SELECT).state == "Box"
+    assert services.led_colours()[-1] == RED
+
+
+async def test_moves_a_playing_playlist(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, PLAYLIST_UID)
     await _hold(hass)
     [move] = services["music_assistant.transfer_queue"]
     assert move.data == {
@@ -72,10 +184,10 @@ async def test_moves_a_playing_queue(
     assert services.led_colours()[-1] == BLUE
 
 
-async def test_moves_a_paused_queue_without_playing(
+async def test_moves_a_paused_playlist_without_playing(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
-    await insert(hass, BOOK_UID)
+    await insert(hass, PLAYLIST_UID)
     hass.states.async_set(BOX_PLAYER, STATE_PAUSED)
     await _hold(hass)
     assert services["music_assistant.transfer_queue"][0].data["auto_play"] is False
@@ -87,6 +199,7 @@ async def test_nothing_loaded_only_selects(
 ) -> None:
     await _hold(hass)
     assert services["music_assistant.transfer_queue"] == []
+    assert services["music_assistant.play_media"] == []
     assert hass.states.get(SELECT).state == "Kids room"
 
 
@@ -111,10 +224,10 @@ async def test_no_free_player(
     assert services.led_colours() == [AMBER]
 
 
-async def test_failed_move_keeps_the_selection(
+async def test_failed_playlist_move_keeps_the_selection(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
-    await insert(hass, BOOK_UID)
+    await insert(hass, PLAYLIST_UID)
     services.register("music_assistant", "transfer_queue")
     async_fire_mqtt_message(
         hass, "audiobox1/event/button", json.dumps({"button": "encoder_hold"})
