@@ -97,6 +97,25 @@ async def test_playlists_skip_tracks(
     assert services["media_player.media_seek"] == []
 
 
+async def test_restart_seeks_to_the_beginning(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, BOOK_UID)
+    _position(hass, STATE_PLAYING, 2000)
+    await _press(hass, "back_restart")
+    [seek] = services["media_player.media_seek"]
+    assert seek.data == {"entity_id": BOX_PLAYER, "seek_position": 0}
+
+
+async def test_playlists_ignore_restart(
+    hass: HomeAssistant, loaded: MockConfigEntry, services: Services
+) -> None:
+    await insert(hass, PLAYLIST_UID)
+    await _press(hass, "back_restart")
+    assert services["media_player.media_seek"] == []
+    assert services["media_player.media_previous_track"] == []
+
+
 @pytest.mark.parametrize(
     "payload",
     ["not json", '{"x": 1}', '["button"]', '"playpause"', '{"button": "dance"}'],

@@ -434,6 +434,8 @@ class BoxController:
         elif button in ("back", "fwd"):
             offset = const.SEEK_STEP if button == "fwd" else -const.SEEK_STEP
             self._schedule(partial(self._async_seek, offset), "seek")
+        elif button == "back_restart":
+            self._schedule(self._async_restart, "restart")
         elif button == "encoder_hold":
             self._schedule(self._async_next_player, "next player")
         else:
@@ -469,6 +471,17 @@ class BoxController:
                 ATTR_ENTITY_ID: player,
                 "seek_position": self._clamp(position + offset, duration),
             },
+        )
+
+    async def _async_restart(self) -> None:
+        """The book from its very beginning. Audiobooks only."""
+        player, card = self._selected, self._current_card()
+        if not player or card is None or card.media_type != const.MEDIA_TYPE_AUDIOBOOK:
+            return
+        if self.hass.states.get(player) is None:
+            return
+        await self._async_call(
+            MEDIA_PLAYER, "media_seek", {ATTR_ENTITY_ID: player, "seek_position": 0}
         )
 
     def _current_card(self) -> Card | None:

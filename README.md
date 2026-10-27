@@ -83,6 +83,7 @@ Adding or editing a card never interrupts a box that is playing.
 | Card out | Pause. After 10 minutes still empty: stop, which saves the position, and select the box's own player again |
 | Play/pause | Toggle, only with a card in the tray |
 | Back / forward | 30 s for audiobooks, previous / next track for playlists |
+| Back held 15 s (`back_restart`) | The audiobook from its beginning. Playlists ignore it |
 | Knob turn | Volume of the selected player |
 | Knob long press | Move playback to the next player. A player another box has selected is skipped. A book starts again there as the box's Music Assistant user, at the position it left off |
 
