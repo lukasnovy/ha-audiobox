@@ -94,7 +94,7 @@ Adding or editing a card never interrupts a box that is playing.
 | Back / forward | 30 s for audiobooks, previous / next track for playlists |
 | Back held 15 s (`back_restart`) | The audiobook from its beginning. Playlists ignore it |
 | Knob turn | Volume of the selected player. A change made elsewhere, in the Music Assistant app for example, moves the knob's value too |
-| Knob held 7 s | The ring shows the selected player's colour, then every 4 s the next free player's, round and round. Letting go picks the one shown and moves playback there, paused if it was paused. The new player keeps its own volume; the knob takes it over. A player another box has selected is not offered. A book starts again there as the box's Music Assistant user, at the position it left off. Only with a card in the tray |
+| Knob held 5 s | The ring shows the selected player's colour, then every 2 s the next free player's, round and round. Letting go picks the one shown and moves playback there, paused if it was paused. The new player keeps its own volume; the knob takes it over. A player another box has selected is not offered. A book starts again there as the box's Music Assistant user, at the position it left off. Only with a card in the tray |
 
 | LED | Meaning |
 |---|---|
