@@ -77,13 +77,14 @@ async def test_forward_stops_short_of_the_end(
     assert services["media_player.media_seek"][0].data["seek_position"] == 3595
 
 
-async def test_back_stops_at_zero(
+async def test_back_stops_at_the_start(
     hass: HomeAssistant, loaded: MockConfigEntry, services: Services
 ) -> None:
     await insert(hass, BOOK_UID)
     _position(hass, STATE_PAUSED, 10)
     await _press(hass, "back")
-    assert services["media_player.media_seek"][0].data["seek_position"] == 0
+    # Not 0: Music Assistant would resume the book where it left off.
+    assert services["media_player.media_seek"][0].data["seek_position"] == 1
 
 
 async def test_playlists_skip_tracks(
@@ -104,7 +105,7 @@ async def test_restart_seeks_to_the_beginning(
     _position(hass, STATE_PLAYING, 2000)
     await _press(hass, "back_restart")
     [seek] = services["media_player.media_seek"]
-    assert seek.data == {"entity_id": BOX_PLAYER, "seek_position": 0}
+    assert seek.data == {"entity_id": BOX_PLAYER, "seek_position": 1}
 
 
 async def test_playlists_ignore_restart(

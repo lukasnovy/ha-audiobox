@@ -498,7 +498,9 @@ class BoxController:
         if self.hass.states.get(player) is None:
             return
         await self._async_call(
-            MEDIA_PLAYER, "media_seek", {ATTR_ENTITY_ID: player, "seek_position": 0}
+            MEDIA_PLAYER,
+            "media_seek",
+            {ATTR_ENTITY_ID: player, "seek_position": const.START_POSITION},
         )
 
     def _current_card(self) -> Card | None:
@@ -526,7 +528,7 @@ class BoxController:
 
     @staticmethod
     def _clamp(target: float, duration: float) -> float:
-        target = max(target, 0)
+        target = max(target, const.START_POSITION)
         if duration > 0:
             # Short of the end, so +30 s does not mark the book finished.
             target = min(target, duration - const.END_CLAMP)

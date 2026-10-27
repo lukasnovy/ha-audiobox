@@ -60,6 +60,9 @@ PLAYER_COLOUR_TOPIC: Final = "{prefix}/player_colour"
 SESSION_END = timedelta(minutes=10)
 SEEK_STEP = 30
 END_CLAMP = 5
+# Music Assistant reads a seek to 0 as "no position" and resumes a book where
+# its account left off, so the start of a book is 1 s.
+START_POSITION = 1
 SETTLE_SECONDS = 1.0
 PLAY_CONFIRM_SECONDS = 10.0
 TRANSFER_CONFIRM_SECONDS = 5.0
