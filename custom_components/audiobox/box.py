@@ -70,6 +70,10 @@ class BoxController:
         self._knob_quiet: CALLBACK_TYPE | None = None
         # The choices payload last sent to the box, so it is sent only on a change.
         self._shown_choices: str | None = None
+        # Set from a back/fwd/back_restart press until its seek has ended (ADR-44).
+        self._seek_busy = False
+        # Frees the seek buttons when the red no-card blink is over.
+        self._seek_free: CALLBACK_TYPE | None = None
 
     # --- selection ---------------------------------------------------------
 
@@ -164,10 +168,16 @@ class BoxController:
         for unsub in self._unsubs:
             unsub()
         self._unsubs.clear()
-        for timer in (self._session_timer, self._battery_timer, self._led_off):
+        for timer in (
+            self._session_timer,
+            self._battery_timer,
+            self._led_off,
+            self._seek_free,
+        ):
             if timer is not None:
                 timer()
         self._session_timer = self._battery_timer = self._led_off = None
+        self._seek_free = None
         self._cancel_knob_quiet()
 
     # --- plumbing ----------------------------------------------------------
@@ -451,11 +461,8 @@ class BoxController:
             return
         if button == "playpause":
             self._schedule(self._async_play_pause, "play/pause")
-        elif button in ("back", "fwd"):
-            offset = const.SEEK_STEP if button == "fwd" else -const.SEEK_STEP
-            self._schedule(partial(self._async_seek, offset), "seek")
-        elif button == "back_restart":
-            self._schedule(self._async_restart, "restart")
+        elif button in ("back", "fwd", "back_restart"):
+            self._seek_pressed(button)
         elif button == "select_player" and isinstance(
             index := payload.get("player"), int
         ):
@@ -471,6 +478,43 @@ class BoxController:
             )
         else:
             await self._async_flash("red", 1)
+
+    @callback
+    def _seek_pressed(self, button: str) -> None:
+        """One seek at a time: presses until it has ended are dropped (ADR-44)."""
+        if self._seek_busy:
+            _LOGGER.debug("%s: %s dropped, a seek is running", self.config.name, button)
+            return
+        self._seek_busy = True
+        if not self._card_in_tray():
+            self._schedule(
+                partial(self._async_flash, "red", const.NO_CARD_BLINK), "no card"
+            )
+            self._seek_free = async_call_later(
+                self.hass, const.NO_CARD_BLINK, self._seek_blink_over
+            )
+            return
+        if button == "back_restart":
+            job = self._async_restart
+        else:
+            offset = const.SEEK_STEP if button == "fwd" else -const.SEEK_STEP
+            job = partial(self._async_seek, offset)
+        self._schedule(partial(self._async_seek_job, job), button)
+
+    async def _async_seek_job(
+        self, job: Callable[[], Coroutine[Any, Any, None]]
+    ) -> None:
+        # The call returns once Music Assistant plays again, or fails after its
+        # own timeout. Either way the buttons are free again.
+        try:
+            await job()
+        finally:
+            self._seek_busy = False
+
+    @callback
+    def _seek_blink_over(self, _now: datetime) -> None:
+        self._seek_free = None
+        self._seek_busy = False
 
     async def _async_seek(self, offset: int) -> None:
         """Plus or minus 30 s for audiobooks, previous/next track for playlists."""

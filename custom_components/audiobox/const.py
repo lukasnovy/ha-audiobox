@@ -62,6 +62,8 @@ PLAYER_CHOICES_TOPIC: Final = "{prefix}/player_choices"
 # Timings. Code reads them as `const.NAME` so that tests can patch them.
 SESSION_END = timedelta(minutes=10)
 SEEK_STEP = 30
+# Red blink for back/fwd without a card; the seek buttons stay blocked meanwhile.
+NO_CARD_BLINK = 1.0
 END_CLAMP = 5
 # Music Assistant reads a seek to 0 as "no position" and resumes a book where
 # its account left off, so the start of a book is 1 s.
