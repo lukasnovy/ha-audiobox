@@ -58,9 +58,15 @@ PLAYER_COLOUR_TOPIC: Final = "{prefix}/player_colour"
 # What the box reads: the players a held knob offers, retained, the selected one
 # first, as "index:r,g,b;..." where index is the player's place in the box's list.
 PLAYER_CHOICES_TOPIC: Final = "{prefix}/player_choices"
+# What the box reads: "ON" while the selected player plays, or for PAUSE_HOLD
+# after it was paused without a card; "OFF" otherwise. Retained. Without a card
+# the box's buttons and knob work only while this is ON (2026-10-30).
+PLAYING_TOPIC: Final = "{prefix}/playing"
 
 # Timings. Code reads them as `const.NAME` so that tests can patch them.
 SESSION_END = timedelta(minutes=10)
+# Playback paused without a card keeps the box's controls this long.
+PAUSE_HOLD = timedelta(minutes=10)
 SEEK_STEP = 30
 # Red blink for back/fwd without a card; the seek buttons stay blocked meanwhile.
 NO_CARD_BLINK = 1.0

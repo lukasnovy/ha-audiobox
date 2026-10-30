@@ -42,6 +42,10 @@ publishes the selected player's colour, retained, as `r,g,b` on
 It also publishes, retained, the players a held knob offers on
 `<prefix>/player_choices`: the selected one first, then the free ones after it,
 as `index:r,g,b` joined by `;` (for example `1:0,80,255;2:160,0,255;0:255,255,255`).
+On `<prefix>/playing`, retained, it publishes `ON` while the selected player
+plays, or for 10 minutes after it was paused without a card, and `OFF`
+otherwise. The pause that follows taking the card out never counts. A box
+without a card works its buttons and knob only while this is `ON`.
 
 ## Install
 
@@ -90,11 +94,11 @@ Adding or editing a card never interrupts a box that is playing.
 |---|---|
 | Card in | Play, or resume the same card instantly if it is still paused |
 | Card out | Pause. After 10 minutes still empty: stop, which saves the position, and select the box's own player again |
-| Play/pause | Toggle, only with a card in the tray |
-| Back / forward | 30 s for audiobooks, previous / next track for playlists |
-| Back held 15 s (`back_restart`) | The audiobook from its beginning. Playlists ignore it |
+| Play/pause | Toggle, only with a card in the tray or while the selected player plays (see `<prefix>/playing`), for example from the Music Assistant app |
+| Back / forward | 30 s for audiobooks, previous / next track for playlists. Without a card 30 s, since Music Assistant reports a book as music |
+| Back held 13 s (`back_restart`) | The audiobook from its beginning, without a card whatever plays. Playlist cards ignore it |
 | Knob turn | Volume of the selected player. A change made elsewhere, in the Music Assistant app for example, moves the knob's value too |
-| Knob held 5 s | The ring shows the selected player's colour, then every 2 s the next free player's, round and round. Letting go picks the one shown and moves playback there, paused if it was paused. The new player keeps its own volume; the knob takes it over. A player another box has selected is not offered. A book starts again there as the box's Music Assistant user, at the position it left off. Only with a card in the tray |
+| Knob held 5 s | The ring blinks in the selected player's colour. Turning the knob blinks the next or the previous free player's colour, round and round, and leaves the volume alone. Pressing the knob picks the one blinking and moves playback there, paused if it was paused. Without a press for 30 s after the last turn the player stays. The new player keeps its own volume; the knob takes it over. A player another box has selected is not offered. A book starts again there as the box's Music Assistant user, at the position it left off. Only with a card in the tray or while the selected player plays |
 
 | LED | Meaning |
 |---|---|

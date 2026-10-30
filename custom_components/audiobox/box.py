@@ -25,6 +25,7 @@ from homeassistant.core import (
     Event,
     EventStateChangedData,
     HomeAssistant,
+    State,
     callback,
 )
 from homeassistant.exceptions import HomeAssistantError
@@ -74,6 +75,14 @@ class BoxController:
         self._seek_busy = False
         # Frees the seek buttons when the red no-card blink is over.
         self._seek_free: CALLBACK_TYPE | None = None
+        # Runs for PAUSE_HOLD after playback was paused without a card: the
+        # box's controls keep working meanwhile.
+        self._pause_hold: CALLBACK_TYPE | None = None
+        # The card went while the selected player played: its coming pause is
+        # the card-out pause, which holds nothing.
+        self._card_out_pause = False
+        # The playing payload last sent to the box.
+        self._shown_playing: str | None = None
 
     # --- selection ---------------------------------------------------------
 
@@ -121,6 +130,7 @@ class BoxController:
         for listener in list(self._listeners):
             listener()
         self._show_selected()
+        self._show_playing()
 
     # --- lifecycle ---------------------------------------------------------
 
@@ -161,6 +171,7 @@ class BoxController:
             )
         )
         self._show_selected()
+        self._show_playing()
 
     @callback
     def async_stop(self) -> None:
@@ -173,11 +184,12 @@ class BoxController:
             self._battery_timer,
             self._led_off,
             self._seek_free,
+            self._pause_hold,
         ):
             if timer is not None:
                 timer()
         self._session_timer = self._battery_timer = self._led_off = None
-        self._seek_free = None
+        self._seek_free = self._pause_hold = None
         self._cancel_knob_quiet()
 
     # --- plumbing ----------------------------------------------------------
@@ -419,7 +431,13 @@ class BoxController:
     async def _async_card_out(self) -> None:
         """Pause, not stop: re-inserting the same card resumes instantly (ADR-5)."""
         player = self._selected
-        if self._is(player, STATE_PLAYING):
+        self._cancel_pause_hold()
+        playing = self._is(player, STATE_PLAYING)
+        # The box's controls stop now, not when Music Assistant reports the
+        # pause, and this pause holds nothing.
+        self._card_out_pause = playing
+        self._show_playing()
+        if playing:
             await self._async_try_call(
                 MEDIA_PLAYER, "media_pause", {ATTR_ENTITY_ID: player}
             )
@@ -447,6 +465,77 @@ class BoxController:
         if self.config.players:
             self._set_selection(self.config.players[0].entity_id)
 
+    # --- playback without a card ---------------------------------------------
+
+    def _controls_active(self) -> bool:
+        """The box's buttons and knob work: a card in the tray, or playback."""
+        return self._card_in_tray() or self._playing()
+
+    def _playing(self) -> bool:
+        """The selected player plays, or was paused without a card lately.
+
+        Playback started from the Music Assistant app counts as much as a card
+        (2026-10-30).
+        """
+        if self._card_out_pause:
+            return False
+        return self._is(self._selected, STATE_PLAYING) or (
+            self._pause_hold is not None and self._is(self._selected, STATE_PAUSED)
+        )
+
+    @callback
+    def _playback_changed(self, old: State | None, new: State) -> None:
+        """The selected player's state changed: start or end the pause hold."""
+        old_state = old.state if old is not None else None
+        if new.state == STATE_PLAYING:
+            if old_state != STATE_PLAYING:
+                self._card_out_pause = False
+            self._cancel_pause_hold()
+        elif new.state == STATE_PAUSED:
+            if old_state == STATE_PLAYING:
+                if self._card_out_pause:
+                    self._card_out_pause = False
+                elif not self._card_in_tray():
+                    self._cancel_pause_hold()
+                    self._pause_hold = async_call_later(
+                        self.hass, const.PAUSE_HOLD, self._pause_hold_over
+                    )
+        else:
+            # Stopped, off or gone: nothing left to hold.
+            self._card_out_pause = False
+            self._cancel_pause_hold()
+        self._show_playing()
+
+    @callback
+    def _pause_hold_over(self, _now: datetime) -> None:
+        self._pause_hold = None
+        self._show_playing()
+
+    @callback
+    def _cancel_pause_hold(self) -> None:
+        if self._pause_hold is not None:
+            self._pause_hold()
+            self._pause_hold = None
+
+    @callback
+    def _show_playing(self) -> None:
+        """Tell the box whether playback keeps its controls on, when that changed."""
+        payload = "ON" if self._playing() else "OFF"
+        if payload == self._shown_playing:
+            return
+        self._shown_playing = payload
+        self.entry.async_create_background_task(
+            self.hass,
+            mqtt.async_publish(
+                self.hass,
+                const.PLAYING_TOPIC.format(prefix=self.config.mqtt_prefix),
+                payload,
+                qos=1,
+                retain=True,
+            ),
+            f"audiobox {self.config.name} show playing",
+        )
+
     # --- buttons -------------------------------------------------------------
 
     @callback
@@ -471,8 +560,8 @@ class BoxController:
             _LOGGER.debug("%s: unknown button %r", self.config.name, button)
 
     async def _async_play_pause(self) -> None:
-        """Only with a card in the tray, otherwise a red blink."""
-        if self._card_in_tray():
+        """Only with a card in the tray or playback, otherwise a red blink."""
+        if self._controls_active():
             await self._async_call(
                 MEDIA_PLAYER, "media_play_pause", {ATTR_ENTITY_ID: self._selected}
             )
@@ -486,7 +575,7 @@ class BoxController:
             _LOGGER.debug("%s: %s dropped, a seek is running", self.config.name, button)
             return
         self._seek_busy = True
-        if not self._card_in_tray():
+        if not self._controls_active():
             self._schedule(
                 partial(self._async_flash, "red", const.NO_CARD_BLINK), "no card"
             )
@@ -540,9 +629,15 @@ class BoxController:
         )
 
     async def _async_restart(self) -> None:
-        """The book from its very beginning. Audiobooks only."""
+        """The book from its very beginning. Not for playlist cards.
+
+        Without a card the item is treated as a book: Music Assistant reports
+        every item as music, so a book cannot be told from a song.
+        """
         player, card = self._selected, self._current_card()
-        if not player or card is None or card.media_type != const.MEDIA_TYPE_AUDIOBOOK:
+        if not player or (
+            card is not None and card.media_type != const.MEDIA_TYPE_AUDIOBOOK
+        ):
             return
         if self.hass.states.get(player) is None:
             return
@@ -637,9 +732,10 @@ class BoxController:
         """Move playback to the player the knob was let go on (2026-10-27).
 
         The box cycles through the choices it was sent; one may have gone
-        since, so they are checked again. Only with a card in the tray.
+        since, so they are checked again. Only with a card in the tray or
+        playback.
         """
-        if not self._card_in_tray():
+        if not self._controls_active():
             await self._async_flash("red", 1)
             return
         if index not in self._choices():
@@ -812,6 +908,8 @@ class BoxController:
         if event.data["entity_id"] != self._selected:
             return
         old, new = event.data["old_state"], event.data["new_state"]
+        if new is not None:
+            self._playback_changed(old, new)
         if new is None or (
             old is not None
             and old.attributes.get("volume_level")
